@@ -1,0 +1,1109 @@
+'use client'
+
+import { useState, useMemo, useEffect } from 'react'
+import { createClient } from '@/lib/supabase/client'
+import { useRouter } from 'next/navigation'
+import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd'
+import PixelAvatar from '@/components/PixelAvatar'
+
+export default function DashboardClient({ initialProjects, initialTasks, user }: any) {
+    const [projects, setProjects] = useState(initialProjects)
+    const [tasks, setTasks] = useState(initialTasks)
+    const [activeTab, setActiveTab] = useState('all')
+    const [newProjectName, setNewProjectName] = useState('')
+    const [newTaskTitle, setNewTaskTitle] = useState('')
+    const [newTaskAssignee, setNewTaskAssignee] = useState('')
+    const [editingAssigneeId, setEditingAssigneeId] = useState<string | null>(null)
+    const [editAssigneeValue, setEditAssigneeValue] = useState('')
+    const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null)
+    const [comments, setComments] = useState<any[]>([])
+    const [newComment, setNewComment] = useState('')
+    const [newTaskPriority, setNewTaskPriority] = useState('normal') // normal, elite, boss
+    const [userRole, setUserRole] = useState<string | null>(null) // 'owner', 'admin', 'member'
+    const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
+    const [displayName, setDisplayName] = useState<string>('')
+    const [uploading, setUploading] = useState(false)
+    const [commentCounts, setCommentCounts] = useState<Record<string, number>>({})
+    const [isJoining, setIsJoining] = useState(false)
+    const [inviteCodeInput, setInviteCodeInput] = useState('')
+    const [activeProject, setActiveProject] = useState<any>(null)
+    const [projectInviteCode, setProjectInviteCode] = useState<string | null>(null)
+    const [projectMembers, setProjectMembers] = useState<any[]>([])
+    const [isQuestClearing, setIsQuestClearing] = useState(false)
+    const [userProfiles, setUserProfiles] = useState<Record<string, { display_name: string, avatar_url: string }>>({})
+
+    const supabase = createClient()
+    const router = useRouter()
+
+    const handleLogout = async () => {
+        await supabase.auth.signOut()
+        router.refresh()
+    }
+
+    // 招待コードを使用してプロジェクトに参加
+    const joinProject = async () => {
+        if (!inviteCodeInput) return
+        setIsJoining(true)
+        const { error } = await supabase.rpc('join_project_by_code', { target_invite_code: inviteCodeInput })
+        if (error) {
+            alert('参加エラー: ' + error.message)
+        } else {
+            alert('プロジェクトに参加しました！')
+            setInviteCodeInput('')
+            fetchLatestData()
+        }
+        setIsJoining(false)
+    }
+
+    // 最新データを再取得して永続性を確保する（エラー時は既存データを保持）
+    const fetchLatestData = async () => {
+        try {
+            const { data: projData, error: projError } = await supabase.from('projects').select('*')
+            if (projError) {
+                console.error('[JPBQuest] プロジェクト取得エラー:', projError.message)
+            } else {
+                // データが空（0件）であってもステートを更新する
+                setProjects(projData || [])
+            }
+
+            const { data: taskData, error: taskError } = await supabase.from('tasks').select('*').order('order_index', { ascending: true })
+            if (taskError) {
+                console.error('[JPBQuest] タスク取得エラー:', taskError.message)
+            } else {
+                // データが空（0件）であってもステートを更新する
+                setTasks(taskData || [])
+            }
+
+            // 全コメントの件数を取得してタスクIDごとに集計
+            const { data: countData, error: commentError } = await supabase.from('comments').select('task_id')
+            if (commentError) {
+                console.error('[JPBQuest] コメント取得エラー:', commentError.message)
+            } else if (countData) {
+                const counts: Record<string, number> = {}
+                countData.forEach(c => {
+                    counts[c.task_id] = (counts[c.task_id] || 0) + 1
+                })
+                setCommentCounts(counts)
+            }
+
+            // アバターと表示名の取得
+            try {
+                const { data: profile, error: profileError } = await supabase.from('profiles').select('avatar_url, display_name').eq('id', user.id).maybeSingle()
+                
+                if (profileError) {
+                    console.warn('[JPBQuest] プロフィール取得スキップ（未作成）:', profileError.message)
+                }
+                
+                // プロフィールがある場合はそれを使うが、ない場合は名前からDiceBearを生成
+                const currentName = profile?.display_name || user.email?.split('@')[0] || 'hero'
+                setDisplayName(currentName)
+                
+                if (profile?.avatar_url) {
+                    setAvatarUrl(profile.avatar_url)
+                } else {
+                    setAvatarUrl(`https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(currentName)}`)
+                }
+
+                // 全メンバーのプロフィール情報を取得して userId -> { name, avatar } のマップを作成
+                const { data: allProfiles } = await supabase.from('profiles').select('id, display_name, avatar_url')
+                const profileMap: Record<string, { display_name: string, avatar_url: string }> = {}
+                
+                if (allProfiles) {
+                    allProfiles.forEach((p: any) => {
+                        profileMap[p.id] = {
+                            display_name: p.display_name || '冒険者',
+                            avatar_url: p.avatar_url || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(p.display_name || p.id)}`
+                        }
+                    })
+                }
+                
+                // 自分の情報がまだmapにない場合（初回など）の補完
+                if (!profileMap[user.id]) {
+                    profileMap[user.id] = {
+                        display_name: currentName,
+                        avatar_url: avatarUrl || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(currentName)}`
+                    }
+                }
+                
+                setUserProfiles(profileMap)
+            } catch (e) {
+                console.error('[JPBQuest] プロフィール処理エラー:', e)
+            }
+        } catch (e) {
+            console.error('[JPBQuest] データ取得中の予期せぬエラー:', e)
+        }
+    }
+
+    // 現在のプロジェクトでの自分の権限を確認する
+    const fetchMyRole = async () => {
+        if (activeTab === 'all') {
+            setUserRole('admin') // 全体マップでは全表示
+            setActiveProject(null)
+            setProjectInviteCode(null)
+            return
+        }
+
+        // プロジェクト情報と自分のロールを取得
+        const { data: projData } = await supabase.from('projects').select('*').eq('id', activeTab).single()
+        if (projData) {
+            setActiveProject(projData)
+            setProjectInviteCode(projData.invite_code)
+        }
+
+        const { data } = await supabase
+            .from('project_members')
+            .select('role')
+            .eq('project_id', activeTab)
+            .eq('user_id', user.id)
+            .single()
+        if (data) setUserRole(data.role)
+
+        // プロジェクトの全メンバーを取得（軍師以上なら管理できるように）
+        const { data: members } = await supabase
+            .from('project_members')
+            .select('user_id, role')
+            .eq('project_id', activeTab)
+        if (members) {
+            // ここでは簡易的にメールアドレスを想定（本来は profiles と結合）
+            setProjectMembers(members)
+        }
+    }
+
+    useEffect(() => {
+        fetchLatestData()
+    }, [])
+
+    useEffect(() => {
+        fetchMyRole()
+    }, [activeTab])
+
+    const isOwner = userRole === 'owner'
+    const isManager = userRole === 'owner' || userRole === 'admin' // adminを軍師として扱う
+
+    // ユーザーIDからプロフィール情報を取得するヘルパー
+    const getProfile = (userId: string) => {
+        return userProfiles[userId] || {
+            display_name: '冒険者',
+            avatar_url: `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(userId)}`
+        }
+    }
+
+    // 名前（テキスト）からフォールバック用のアバターURLを取得
+    const getFallbackAvatar = (name: string) => {
+        // 名前が一致するプロフィールを探す
+        const found = Object.values(userProfiles).find(p => p.display_name === name)
+        return found?.avatar_url || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(name)}`
+    }
+
+    const renderTaskItem = (task: any, index: number) => {
+        const isProgress = task.status === 'progress';
+        const assignees = (task.assignee_name || '担当未定').split(/[,、\s]+/).filter(Boolean).slice(0, 5);
+        const isBoss = task.priority === 'boss';
+        const isElite = task.priority === 'elite';
+
+        // Priority specific styling
+        let priorityClasses = "border-b-2 border-dotted border-[#333]";
+        if (isBoss) priorityClasses = "border-4 border-solid !border-[#ff3333] shadow-[0_0_40px_rgba(255,51,51,0.7)] my-8 scale-[1.02] z-10 relative bg-[#050505]";
+        else if (isElite) priorityClasses = "border-4 border-solid !border-[#ffaa00] shadow-[0_0_30px_rgba(255,170,0,0.5)] my-8 scale-[1.01] z-10 relative bg-[#050505]";
+
+        return (
+            <Draggable key={task.id} draggableId={task.id} index={index}>
+                {(provided) => (
+                    <li
+                        ref={provided.innerRef}
+                        {...provided.draggableProps}
+                        className={`bg-black transition-all ${priorityClasses}`}
+                    >
+                        <div className={`flex items-center p-5 gap-4 transition-colors hover:bg-[#111]
+                 ${isProgress ? 'border-l-8 border-l-[var(--progress-color)] bg-[rgba(255,68,68,0.05)] text-white' : 'text-[var(--muted-color)]'}`}>
+
+                            <div {...provided.dragHandleProps} className="text-yellow-400 hover:text-yellow-200 cursor-grab active:cursor-grabbing px-2 text-4xl select-none leading-none hover:scale-110 transition-all">
+                                ⠿
+                            </div>
+
+                            <div className="relative shrink-0 flex items-center">
+                                <input type="checkbox" checked={false} onChange={(e) => markCompleted(task, e.target.checked)} className={`appearance-none w-6 h-6 border-2 bg-black cursor-pointer align-middle ${isProgress ? 'border-white' : 'border-[var(--muted-color)]'}`} />
+                            </div>
+
+                            <div className="grow text-lg flex items-center flex-wrap gap-4">
+                                <span
+                                    className={`mr-2 cursor-pointer hover:underline decoration-[var(--active-color)] underline-offset-4 
+                                        ${isBoss ? 'text-[#ff4444] font-bold text-2xl tracking-tighter' : isElite ? 'text-[#ffaa00] font-bold text-xl' : ''}`}
+                                    onClick={() => toggleTaskExpansion(task.id)}
+                                    title="クリックで作戦会議（コメント）を開く"
+                                >
+                                    {task.title}
+                                </span>
+                                <div className="flex gap-2 items-center">
+                                    <div className="cursor-pointer select-none" onClick={() => toggleProgress(task)} title="クリックで進行状態を変更">
+                                        {isProgress ? (
+                                            <span className="text-sm px-1.5 py-0.5 border border-[var(--progress-color)] text-[var(--progress-color)] rounded inline-flex items-center gap-1 hover:bg-[var(--progress-color)] hover:text-black transition-colors">⚔️ 冒険中</span>
+                                        ) : (
+                                            <span className="text-sm px-1.5 py-0.5 border border-[var(--muted-color)] text-[var(--muted-color)] rounded inline-flex items-center gap-1 hover:border-[var(--muted-color)] hover:text-white transition-colors">📜 受注待ち</span>
+                                        )}
+                                    </div>
+                                    <select
+                                        value={task.priority || 'normal'}
+                                        onChange={(e) => updateTaskPriority(task, e.target.value)}
+                                        className="bg-transparent border border-[#444] text-[10px] text-gray-500 outline-none hover:border-gray-400 cursor-pointer"
+                                    >
+                                        <option value="normal">雑魚敵</option>
+                                        <option value="elite">中ボス</option>
+                                        <option value="boss">大ボス</option>
+                                    </select>
+                                </div>
+                                {activeTab === 'all' && <span className="text-sm ml-2 bg-gray-800 px-2 py-0.5 rounded text-gray-300">({projects.find((p: any) => p.id === task.project_id)?.name})</span>}
+                                <div
+                                    className="ml-auto text-xs text-gray-700 hover:text-gray-400 cursor-pointer flex items-center gap-1 group/comment"
+                                    onClick={() => toggleTaskExpansion(task.id)}
+                                    title="作戦会議"
+                                >
+                                    <span className="group-hover/comment:scale-125 transition-transform">💬</span>
+                                    {commentCounts[task.id] > 0 && (
+                                        <span className="bg-yellow-900/30 text-[var(--active-color)] px-1 rounded min-w-[1.2em] text-center font-bold border border-yellow-800/50">
+                                            {commentCounts[task.id]}
+                                        </span>
+                                    )}
+                                </div>
+                                {isOwner && (
+                                    <button
+                                        className="text-gray-700 hover:text-red-500 text-xs p-1 border border-transparent hover:border-red-900 transition-colors"
+                                        onClick={(e) => { e.stopPropagation(); deleteTask(task.id); }}
+                                        title="クエストを破棄（大魔王のみ）"
+                                    >
+                                        🗑️
+                                    </button>
+                                )}
+                            </div>
+
+                            <div className="flex flex-col items-center gap-1 w-[110px] shrink-0 justify-end mt-2 md:mt-0 relative" onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setEditingAssigneeId(task.id);
+                                setEditAssigneeValue(task.assignee_name || '');
+                            }}>
+                                {editingAssigneeId === task.id ? (
+                                    <div className="flex items-center gap-1 w-[160px] bg-[#111] border-2 border-[var(--active-color)] p-1 absolute bottom-0 right-0 z-20 shadow-[0_0_10px_rgba(255,170,0,0.5)]">
+                                        <span className="text-[var(--active-color)] text-xs animate-pulse">▶︎</span>
+                                        <select
+                                            autoFocus
+                                            value={editAssigneeValue}
+                                            onChange={(e) => {
+                                                setEditAssigneeValue(e.target.value);
+                                                updateAssignee(task.id, e.target.value);
+                                            }}
+                                            onBlur={() => setEditingAssigneeId(null)}
+                                            className="w-full text-xs text-white bg-black border-none outline-none font-inherit cursor-pointer"
+                                        >
+                                            <option value="">担当未定</option>
+                                            {partyMembers.map((name, i) => (
+                                                <option key={i} value={name as string}>{name as string}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                ) : (
+                                    <div className="group/assignee flex flex-col items-center w-full cursor-pointer hover:bg-[#222] p-1 border border-transparent hover:border-[#444] transition-all">
+                                        <div className="flex -space-x-1 mb-1">
+                                            {assignees.map((name: string, i: number) => (
+                                                <img 
+                                                    key={i} 
+                                                    src={getFallbackAvatar(name)} 
+                                                    alt={name} 
+                                                    className="w-7 h-7 pixelated-avatar border border-black shadow-sm shadow-white/10 object-cover" 
+                                                    style={{ zIndex: 10 - i }} 
+                                                />
+                                            ))}
+                                        </div>
+                                        <span className="text-[10px] text-center text-gray-400 truncate w-full group-hover/assignee:text-[var(--active-color)] flex items-center justify-center gap-1">
+                                            <span className="opacity-0 group-hover/assignee:opacity-100 transition-opacity text-[var(--active-color)]">▶︎</span>
+                                            {task.assignee_name ? task.assignee_name : '担当未定'}
+                                        </span>
+                                    </div>
+                                )}
+                            </div>
+
+                        </div>
+
+                        {/* 💬 作戦会議（コメント）エリア展開 */}
+                        {expandedTaskId === task.id && (
+                            <div className="bg-[#111] p-4 border-t border-[#333] ml-11 mr-4 mb-4 rounded-sm border-2 border-dashed border-[#555]">
+                                <h4 className="text-[var(--active-color)] mb-3 text-sm flex items-center gap-2 font-bold px-2 border-l-4 border-[var(--active-color)]">
+                                    <span>💬 作戦会議（指令・報告）</span>
+                                </h4>
+
+                                <div className="flex flex-col gap-4 mb-5 max-h-[400px] overflow-y-auto pr-3 custom-scrollbar">
+                                    {comments.length === 0 ? (
+                                        <div className="text-gray-500 text-sm text-center py-6 border border-dashed border-[#333]">まだ英雄たちの記録はありません。</div>
+                                    ) : (
+                                        comments.map((comment: any) => {
+                                            const profile = getProfile(comment.user_id)
+                                            return (
+                                                <div key={comment.id} className="flex gap-3 mb-2">
+                                                    <img 
+                                                        src={profile.avatar_url} 
+                                                        alt="Avatar" 
+                                                        className="w-10 h-10 pixelated-avatar shrink-0 border-2 border-[#555] object-cover" 
+                                                    />
+                                                    <div className="bg-black border-2 border-[#444] p-3 rounded-sm relative grow shadow-sm">
+                                                        <div className="absolute top-4 -left-2.5 w-0 h-0 border-t-6 border-t-transparent border-r-10 border-r-[#444] border-b-6 border-b-transparent"></div>
+                                                        <div className="flex justify-between items-baseline mb-2 border-b border-[#222] pb-1">
+                                                            <span className="text-[10px] text-[var(--active-color)] uppercase tracking-widest font-bold">
+                                                                {profile.display_name}
+                                                            </span>
+                                                            <span className="text-[8px] text-gray-500">
+                                                                {new Date(comment.created_at).toLocaleString('ja-JP')}
+                                                            </span>
+                                                        </div>
+                                                        <p className="text-sm leading-relaxed text-gray-200 whitespace-pre-wrap">{comment.content}</p>
+                                                    </div>
+                                                </div>
+                                            )
+                                        })
+                                    )}
+                                </div>
+
+                                <form onSubmit={(e) => submitComment(e, task.id)} className="flex flex-col gap-2 mt-2 px-2">
+                                    <textarea
+                                        value={newComment}
+                                        onChange={(e) => setNewComment(e.target.value)}
+                                        placeholder="具体的な作戦や進捗をここに記せ..."
+                                        rows={4}
+                                        className="w-full bg-black border-2 border-[#555] p-3 text-white text-sm outline-none focus:border-[var(--active-color)] transition-all resize-none font-inherit leading-relaxed"
+                                    />
+                                    <div className="flex justify-end mt-1">
+                                        <button
+                                            type="submit"
+                                            disabled={!newComment.trim()}
+                                            className="px-8 py-2 bg-[#222] border-2 border-[#555] text-white text-sm font-bold hover:bg-[var(--active-color)] hover:text-black hover:scale-105 transition-all shadow-[0_4px_0_#000]"
+                                        >
+                                            書き込む
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+                        )}
+                    </li>
+                )}
+            </Draggable>
+        );
+    }
+
+    const createProject = async (e: React.FormEvent) => {
+        e.preventDefault()
+        if (!newProjectName) return
+
+        // RLS prevents us from selecting a project immediately after insert because 
+        // the project_members row doesn't exist yet. So we generate the ID client-side.
+        const newProjectId = crypto.randomUUID();
+
+        const { error } = await supabase
+            .from('projects')
+            .insert({ id: newProjectId, name: newProjectName })
+
+        if (!error) {
+            // Insert membership so RLS allows viewing
+            const { error: memError } = await supabase.from('project_members').insert({
+                project_id: newProjectId,
+                user_id: user.id,
+                role: 'owner'
+            })
+
+            if (memError) {
+                alert('メンバー追加エラー: ' + memError.message)
+            } else {
+                setProjects([...projects, { id: newProjectId, name: newProjectName }])
+                setNewProjectName('')
+                router.refresh()
+            }
+        } else {
+            alert('プロジェクト作成エラー: ' + error.message)
+        }
+    }
+
+    const createTask = async (e: React.FormEvent) => {
+        e.preventDefault()
+        if (!newTaskTitle || activeTab === 'all') return
+
+        const newTaskId = crypto.randomUUID();
+
+        const { error } = await supabase
+            .from('tasks')
+            .insert({
+                id: newTaskId,
+                title: newTaskTitle,
+                project_id: activeTab,
+                assignee_id: user.id,
+                assignee_name: newTaskAssignee || displayName || user.email?.split('@')[0] || '勇者',
+                priority: newTaskPriority,
+                order_index: activeTasks.length // New tasks go to the end
+            })
+
+        if (!error) {
+            const newTask = {
+                id: newTaskId,
+                title: newTaskTitle,
+                project_id: activeTab,
+                assignee_id: user.id,
+                assignee_name: newTaskAssignee || displayName || user.email?.split('@')[0] || '勇者',
+                status: 'unstarted',
+                priority: newTaskPriority,
+                order_index: activeTasks.length
+            };
+            setTasks([newTask, ...tasks])
+            setNewTaskTitle('')
+            setNewTaskAssignee('')
+            setNewTaskPriority('normal')
+        } else if (error) {
+            alert('クエスト（タスク）作成エラー: ' + error.message)
+        }
+    }
+
+    const updateTaskPriority = async (task: any, newPriority: string) => {
+        const { error } = await supabase.from('tasks').update({ priority: newPriority }).eq('id', task.id)
+        if (!error) {
+            setTasks(tasks.map((t: any) => t.id === task.id ? { ...t, priority: newPriority } : t))
+        }
+    }
+
+    const onDragEnd = async (result: any) => {
+        if (!result.destination) return
+
+        const items = Array.from(activeTasks)
+        const [reorderedItem] = items.splice(result.source.index, 1)
+        items.splice(result.destination.index, 0, reorderedItem)
+
+        // Update local state immediately for snappy UI
+        const newTasks = tasks.map((t: any) => {
+            const indexInActive = items.findIndex((item: any) => item.id === t.id)
+            if (indexInActive !== -1) {
+                return { ...t, order_index: indexInActive }
+            }
+            return t
+        })
+        setTasks(newTasks)
+
+        // Persist all changes to DB
+        for (let i = 0; i < items.length; i++) {
+            await supabase.from('tasks').update({ order_index: i }).eq('id', (items[i] as any).id)
+        }
+    }
+
+    const updateAssignee = async (taskId: string, newValue?: string) => {
+        const finalValue = newValue !== undefined ? newValue : editAssigneeValue
+        const { error } = await supabase
+            .from('tasks')
+            .update({ assignee_name: finalValue })
+            .eq('id', taskId)
+
+        if (!error) {
+            setTasks(tasks.map((t: any) => t.id === taskId ? { ...t, assignee_name: finalValue } : t))
+        }
+        setEditingAssigneeId(null)
+    }
+
+    const playLevelUpSound = () => {
+        // レベルアップ効果音のURL（DQ風のフリー音源などを想定）
+        // 一旦ブラウザで再生可能なサンプル音源を設定しますが、必要に応じて差し替え可能です。
+        const audioData = "https://assets.mixkit.co/active_storage/sfx/2013/2013-preview.mp3"; // 短い成功音
+        const audio = new Audio(audioData);
+        audio.play().catch(e => console.log('Audio play blocked:', e));
+    }
+
+    const markCompleted = async (task: any, isCompleted: boolean) => {
+        if (isCompleted) {
+            // クエスト完了演出
+            setIsQuestClearing(true)
+            playLevelUpSound()
+
+            // 2秒後に実際に完了処理を行う
+            setTimeout(async () => {
+                const newStatus = 'completed';
+                const updateData: any = {
+                    status: newStatus,
+                    completed_at: new Date().toISOString()
+                }
+
+                const { error } = await supabase.from('tasks').update(updateData).eq('id', task.id)
+                if (!error) {
+                    setTasks(tasks.map((t: any) => t.id === task.id ? { ...t, status: newStatus, completed_at: updateData.completed_at } : t))
+                }
+                setIsQuestClearing(false)
+            }, 2500)
+        } else {
+            // 未完了に戻す場合
+            const newStatus = 'unstarted';
+            const { error } = await supabase.from('tasks').update({ status: newStatus, completed_at: null }).eq('id', task.id)
+            if (!error) {
+                setTasks(tasks.map((t: any) => t.id === task.id ? { ...t, status: newStatus, completed_at: null } : t))
+            }
+        }
+    }
+
+    const toggleProgress = async (task: any) => {
+        if (task.status === 'completed') return;
+        const newStatus = task.status === 'unstarted' ? 'progress' : 'unstarted';
+        const { error } = await supabase.from('tasks').update({ status: newStatus }).eq('id', task.id)
+        if (!error) {
+            setTasks(tasks.map((t: any) => t.id === task.id ? { ...t, status: newStatus } : t))
+        }
+    }
+
+    const deleteTask = async (taskId: string) => {
+        if (!confirm('このクエスト（タスク）を本当に破棄しますか？\n（この操作は取り消せません）')) return
+
+        const { error } = await supabase.from('tasks').delete().eq('id', taskId)
+        if (!error) {
+            setTasks(tasks.filter((t: any) => t.id !== taskId))
+        } else {
+            alert('削除エラー: ' + error.message)
+        }
+    }
+
+    const deleteProject = async (projectId: string) => {
+        if (projectId === 'all') return
+        if (!isOwner) {
+            alert('拠点の放棄（削除）は「大魔王（オーナー）」のみ可能です。')
+            return
+        }
+        const project = projects.find((p: any) => p.id === projectId)
+        if (!project) return
+
+        if (!confirm(`拠点「${project.name}」を完全に放棄しますか？\nこの拠点に属する全てのクエストも消失します。\nよろしいですか？`)) return
+        if (!confirm(`【最終確認】本当に "${project.name}" を消去しますか？`)) return
+
+        const { error } = await supabase.from('projects').delete().eq('id', projectId)
+        if (!error) {
+            setProjects(projects.filter((p: any) => p.id !== projectId))
+            setTasks(tasks.filter((t: any) => t.project_id !== projectId))
+            setActiveTab('all')
+        } else {
+            alert('プロジェクト削除エラー: ' + error.message)
+        }
+    }
+
+    const uploadAvatar = async (event: any) => {
+        try {
+            setUploading(true)
+            if (!event.target.files || event.target.files.length === 0) {
+                throw new Error('画像を選択してください。')
+            }
+
+            const file = event.target.files[0]
+            const fileExt = file.name.split('.').pop()
+            const filePath = `${user.id}-${Math.random()}.${fileExt}`
+
+            const { error: uploadError } = await supabase.storage
+                .from('avatars')
+                .upload(filePath, file)
+
+            if (uploadError) throw uploadError
+
+            const { data: { publicUrl } } = supabase.storage
+                .from('avatars')
+                .getPublicUrl(filePath)
+
+            // profilesテーブルを更新（なければ作成）
+            const { error: upsertError } = await supabase
+                .from('profiles')
+                .upsert({ id: user.id, avatar_url: publicUrl, updated_at: new Date().toISOString() })
+
+            if (upsertError) throw upsertError
+
+            setAvatarUrl(publicUrl)
+            alert('プロフィール写真を変更しました！')
+        } catch (error: any) {
+            alert('アップロードエラー: ' + error.message)
+        } finally {
+            setUploading(false)
+        }
+    }
+
+    const toggleTaskExpansion = async (taskId: string) => {
+        if (expandedTaskId === taskId) {
+            setExpandedTaskId(null)
+            setComments([])
+            return
+        }
+
+        setExpandedTaskId(taskId)
+        const { data, error } = await supabase
+            .from('comments')
+            .select('*')
+            .eq('task_id', taskId)
+            .order('created_at', { ascending: true })
+
+        if (!error && data) {
+            setComments(data)
+        }
+    }
+
+    const submitComment = async (e: React.FormEvent, taskId: string) => {
+        e.preventDefault()
+        if (!newComment.trim()) return
+
+        const { data, error } = await supabase
+            .from('comments')
+            .insert({
+                task_id: taskId,
+                user_id: user.id,
+                user_email: user.email,
+                content: newComment
+            })
+            .select()
+
+        if (!error && data) {
+            setComments([...comments, data[0]])
+            setNewComment('')
+            // コメント件数を即座にカウントアップ
+            setCommentCounts(prev => ({
+                ...prev,
+                [taskId]: (prev[taskId] || 0) + 1
+            }))
+        }
+    }
+
+    // タスクを未完了と完了済みに分ける
+    const visibleTasks = useMemo(() => {
+        const filtered = activeTab === 'all' ? tasks : tasks.filter((t: any) => t.project_id === activeTab)
+        // Sort by order_index primarily
+        return filtered.sort((a: any, b: any) => (a.order_index || 0) - (b.order_index || 0))
+    }, [tasks, activeTab])
+
+    const activeTasks = visibleTasks.filter((t: any) => t.status !== 'completed')
+    const completedTasks = visibleTasks.filter((t: any) => t.status === 'completed')
+
+    // ボトルネック（緊急）は priority: 'boss' かつ status: 'blocked' か status: 'progress' 的なものを想定
+    const bottleneckTasks = activeTasks.filter((t: any) => t.priority === 'boss')
+
+    // 🌟 パーティメンバー（過去のユニークな担当者名 + 自分自身）の抽出
+    const partyMembers = useMemo(() => {
+        const namesFromTasks = tasks.flatMap((t: any) => (t.assignee_name || '').split(/[,、\s]+/).filter(Boolean));
+        const currentUser = displayName || user.email?.split('@')[0] || '勇者';
+        // 自分自身と、実際にタスクに存在する担当者名だけに絞る
+        return Array.from(new Set([currentUser, ...namesFromTasks])).sort();
+    }, [tasks, user.email, displayName]);
+
+    return (
+        <main className="py-12 min-h-screen relative">
+            {/* 🌟 クエスト完了演出オーバーレイ */}
+            {isQuestClearing && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm animate-in fade-in duration-500">
+                    <div className="text-center transform animate-in zoom-in spin-in duration-700">
+                        <h2 className="text-6xl md:text-8xl font-black text-yellow-400 tracking-[0.2em] mb-4"
+                            style={{ textShadow: '0 0 20px #facc15, 0 0 40px #eab308, 4px 4px 0 #000' }}>
+                            QUEST CLEAR!
+                        </h2>
+                        <p className="text-2xl text-white font-bold tracking-widest animate-pulse">
+                            EXPERIENCE POINTS UP!
+                        </p>
+                        <div className="mt-8 flex justify-center gap-2">
+                            {[...Array(5)].map((_, i) => (
+                                <span key={i} className="text-4xl animate-bounce" style={{ animationDelay: `${i * 0.1}s` }}>⭐</span>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            )}
+            <div className="flex justify-between items-center mb-10 border-b-4 border-double border-white pb-6 bg-black p-6 shadow-[0_0_0_4px_#000,0_0_0_8px_#fff] mx-4 relative overflow-hidden">
+                <div className="flex items-center gap-6">
+                    <div className="relative group">
+                        <img
+                            src={avatarUrl || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(displayName || user.email || 'hero')}`}
+                            alt="Avatar"
+                            className="w-20 h-20 pixelated-avatar border-4 border-white shadow-[4px_4px_0_#444] group-hover:brightness-75 transition-all cursor-pointer object-cover"
+                        />
+                        <label className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 cursor-pointer text-[10px] text-white font-bold bg-black/50 text-center p-1 leading-tight">
+                            {uploading ? '⬆️...' : '📷 変更'}
+                            <input type="file" className="hidden" accept="image/*" onChange={uploadAvatar} disabled={uploading} />
+                        </label>
+                    </div>
+                    <div>
+                        <h1 className="text-4xl font-bold text-white uppercase tracking-wider mb-1" style={{ textShadow: '2px 2px 0 #000, 4px 4px 0 #444' }}>
+                            {displayName}
+                        </h1>
+                        <div className="flex items-center gap-2">
+                            <span className="text-[10px] text-[var(--muted-color)] uppercase tracking-tighter">LV 99 LEGENDARY HERO</span>
+                            <span className="text-[10px] bg-yellow-900/50 text-yellow-300 px-2 py-0.5 rounded-full border border-yellow-600 font-bold uppercase tracking-widest">{userRole || 'Loading...'}</span>
+                        </div>
+                    </div>
+                </div>
+                <div className="flex items-center gap-4">
+                    <a href="/settings" className="text-gray-500 hover:text-white text-xl transition-colors" title="冒険者設定">⚙️</a>
+                    <button onClick={handleLogout} className="text-gray-400 hover:text-white underline text-sm tracking-widest uppercase transition-colors">Sign Out</button>
+                </div>
+            </div>
+
+            {/* ドロップダウン用データリスト（共通） */}
+            <datalist id="party-members">
+                {partyMembers.map((name, i) => (
+                    <option key={i} value={name as string} />
+                ))}
+            </datalist>
+
+            {bottleneckTasks.length > 0 && (
+                <div className="retro-window border-[var(--danger-color)] shadow-[0_0_20px_rgba(255,51,51,0.2)]">
+                    <h2 className="retro-title text-[var(--danger-color)] border-[var(--danger-color)] bg-[rgba(255,51,51,0.1)]">🚨 緊急クエスト（BOSS ENCOUNTER）</h2>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {bottleneckTasks.map((task: any) => (
+                            <div key={task.id} className="border-2 border-[var(--danger-color)] p-3 flex items-center gap-4 bg-[rgba(255,51,51,0.1)] cursor-pointer hover:translate-x-1 hover:bg-[rgba(255,51,51,0.2)] transition-all">
+                                <img 
+                                    src={getFallbackAvatar(task.assignee_name || 'unknown')} 
+                                    alt="担当者" 
+                                    className="w-12 h-12 pixelated-avatar object-cover" 
+                                />
+                                <div className="flex-grow">
+                                    <div className="text-xl mb-1">{task.title}</div>
+                                    <div className="text-[var(--danger-color)] text-sm">▶︎ HP: 進行停止中 (SOS!)</div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            <div className="flex flex-col lg:flex-row gap-6">
+
+                {/* 左カラム：メインタスクエリア（広め）*/}
+                <div className="w-full lg:w-3/4 flex flex-col gap-6">
+                    {/* プロジェクト作成エリア (簡易) */}
+                    <div className="flex gap-2">
+                        <form onSubmit={createProject} className="flex gap-2 w-full">
+                            <input
+                                type="text"
+                                value={newProjectName}
+                                onChange={e => setNewProjectName(e.target.value)}
+                                placeholder="新しいプロジェクト（ギルド拠点の作成）"
+                                className="bg-black border-2 border-white p-2 text-white outline-none flex-grow text-sm font-inherit placeholder:text-gray-400 focus:bg-[#111]"
+                            />
+                            <button type="submit" className="border-2 border-white px-4 text-sm font-bold bg-black text-white hover:bg-white hover:text-black transition-all shrink-0">設立</button>
+                        </form>
+                    </div>
+
+                    <div className="retro-window">
+                        {/* 選択中のプロジェクトタイトル */}
+                        <div className="flex flex-col gap-4 mb-4 border-b-2 border-dashed border-[#555] pb-4">
+                            <div className="flex justify-between items-center">
+                                <h2 className="text-2xl text-[var(--active-color)]">
+                                    {activeTab === 'all' ? '🌐 全体マップ' : `🏰 ${projects.find((p: any) => p.id === activeTab)?.name || '不明な拠点'}`}
+                                </h2>
+                                <div className="flex gap-2">
+                                    {activeTab !== 'all' && isOwner && (
+                                        <button
+                                            onClick={() => deleteProject(activeTab)}
+                                            className="text-[10px] border border-red-900 text-red-900 px-2 py-1 hover:bg-red-900 hover:text-white transition-all tracking-tighter"
+                                        >
+                                            この拠点を完全に破壊（削除）する
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+
+                            {activeTab !== 'all' && (
+                                <div className="bg-[#111] p-3 border border-gray-800 text-[10px]">
+                                    <div className="flex justify-between items-center">
+                                        <div>
+                                            <span className="text-gray-500 uppercase tracking-widest mr-2">Secret Invite Spell (招待コード):</span>
+                                            <span className="text-yellow-500 font-mono font-bold select-all">{projectInviteCode || 'LOADING...'}</span>
+                                        </div>
+                                        <div className="text-gray-600 italic">この呪文を仲間に伝えてパーティに招待せよ</div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* 特定のプロジェクト内ならタスク追加フォームを表示（軍師以上） */}
+                        {activeTab !== 'all' && isManager && (
+                            <form onSubmit={createTask} className="mb-10 p-6 bg-black border-4 border-white shadow-[0_0_0_4px_#000,0_0_0_8px_#fff]">
+                                <div className="flex flex-col gap-5">
+                                    <h3 className="text-xl border-b-2 border-dashed border-[#555] pb-3 text-white tracking-widest">📜 新規クエスト発行</h3>
+
+                                    {/* クエスト名（縦積み&全幅） */}
+                                    <div className="flex flex-col gap-2">
+                                        <label className="text-[11px] text-[#aaa] uppercase tracking-[0.2em] font-bold">クエスト名</label>
+                                        <input
+                                            type="text"
+                                            value={newTaskTitle}
+                                            onChange={e => setNewTaskTitle(e.target.value)}
+                                            placeholder="例: スライムを3匹倒す"
+                                            className="bg-black border-4 border-white p-4 text-white outline-none text-xl font-inherit placeholder:text-gray-700 focus:bg-[#111] w-full"
+                                        />
+                                    </div>
+
+                                    {/* 担当者（縦積み&全幅） */}
+                                    <div className="flex flex-col gap-2">
+                                        <label className="text-[11px] text-[#aaa] uppercase tracking-[0.2em] font-bold">担当者</label>
+                                        <select
+                                            value={newTaskAssignee}
+                                            onChange={e => setNewTaskAssignee(e.target.value)}
+                                            className="bg-black border-4 border-white p-4 text-white outline-none text-lg font-inherit focus:bg-[#111] w-full cursor-pointer"
+                                        >
+                                            <option value="">-- パーティメンバーを選択 --</option>
+                                            {partyMembers.map((name, i) => (
+                                                <option key={i} value={name as string}>{name as string}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+
+                                    {/* 強さ選択（縦積み） */}
+                                    <div className="flex flex-col gap-2">
+                                        <label className="text-[11px] text-[#aaa] uppercase tracking-[0.2em] font-bold">強さ（敵ランク）</label>
+                                        <select
+                                            value={newTaskPriority}
+                                            onChange={e => setNewTaskPriority(e.target.value)}
+                                            className="bg-black border-4 border-white p-4 text-white outline-none text-lg focus:bg-[#111] w-full cursor-pointer"
+                                        >
+                                            <option value="normal">⚔️ 雑魚敵 — 通常タスク</option>
+                                            <option value="elite">🟠 中ボス — 重要タスク</option>
+                                            <option value="boss">🔴 大ボス — 最優先・緊急</option>
+                                        </select>
+                                    </div>
+
+                                    {/* 送信ボタン */}
+                                    <button
+                                        type="submit"
+                                        className="w-full bg-white text-black border-4 border-black py-5 text-2xl hover:bg-yellow-100 transition-all font-bold shadow-[0_8px_0_#888] active:translate-y-2 active:shadow-none tracking-[0.2em]"
+                                    >
+                                        💡 クエストを依頼する
+                                    </button>
+                                </div>
+                            </form>
+                        )}
+
+                        <DragDropContext onDragEnd={onDragEnd}>
+                            <Droppable droppableId="active-tasks">
+                                {(provided) => (
+                                    <ul
+                                        {...provided.droppableProps}
+                                        ref={provided.innerRef}
+                                        className="list-none p-0 m-0"
+                                    >
+                                        {activeTasks.length === 0 && <li className="text-gray-500 py-4 text-center">このエリアにアクティブなクエストはありません。</li>}
+
+                                        {activeTab === 'all' ? (
+                                            // 全体マップ時の構成：全プロジェクトを常にループ（タスクがなくても枠は残す）
+                                            projects.map((project: any) => {
+                                                const projectTasks = activeTasks.filter((t: any) => t.project_id === project.id);
+                                                return (
+                                                    <div key={project.id} className="mb-10">
+                                                        <h3 className="text-sm font-bold text-gray-500 mb-3 border-l-4 border-gray-700 pl-2 uppercase tracking-widest">{project.name}</h3>
+                                                        {projectTasks.length === 0 ? (
+                                                            <div className="text-[10px] text-gray-600 italic ml-6 mb-4">この地域にはまだクエストが存在しない...</div>
+                                                        ) : (
+                                                            projectTasks.map((task: any) => {
+                                                                const originalIndex = activeTasks.findIndex((t: any) => t.id === task.id);
+                                                                return renderTaskItem(task, originalIndex);
+                                                            })
+                                                        )}
+                                                    </div>
+                                                );
+                                            })
+                                        ) : (
+                                            activeTasks.map((task: any, index: number) => renderTaskItem(task, index))
+                                        )}
+                                        {provided.placeholder}
+                                    </ul>
+                                )}
+                            </Droppable>
+                        </DragDropContext>
+
+                    </div>
+                </div>
+
+                {/* 右カラム：サイドバー */}
+                <div className="w-full lg:w-1/3 flex flex-col gap-6">
+
+                    <div className="retro-window">
+                        <h3 className="text-gray-400 mb-3 text-lg border-b border-gray-600 pb-1">📜 招待の呪文を入力</h3>
+                        <div className="flex flex-col gap-2">
+                            <input
+                                type="text"
+                                value={inviteCodeInput}
+                                onChange={(e) => setInviteCodeInput(e.target.value)}
+                                placeholder="招待コード（8文字）"
+                                className="bg-black border-2 border-white p-2 text-white outline-none text-xs font-mono"
+                            />
+                            <button
+                                onClick={joinProject}
+                                disabled={isJoining || inviteCodeInput.length < 8}
+                                className="bg-white text-black text-xs font-bold py-2 hover:bg-yellow-400 disabled:opacity-50 transition-colors"
+                            >
+                                {isJoining ? '通信中...' : 'パーティに参加する'}
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* パーティ＆プロジェクト選択 */}
+                    <div className="retro-window">
+                        <h3 className="text-gray-400 mb-3 text-lg border-b border-gray-600 pb-1">🗺️ ロケーション選択</h3>
+                        <div className="flex flex-col gap-2 max-h-[200px] overflow-y-auto pr-2">
+                            <button
+                                onClick={() => setActiveTab('all')}
+                                className={`p-3 border-2 font-inherit transition-all flex items-center gap-3 relative overflow-hidden group
+                                    ${activeTab === 'all' ? 'border-white bg-[#111] scale-105 shadow-[0_0_15px_rgba(255,255,255,0.2)]' : 'border-gray-700 bg-black text-gray-500 hover:border-gray-400'}`}
+                            >
+                                {activeTab === 'all' && <span className="text-[var(--active-color)] animate-pulse absolute left-1">▶︎</span>}
+                                <span className={`text-2xl ml-3 ${activeTab === 'all' ? '' : 'filter grayscale opacity-50'}`}>🌍</span>
+                                <span className={`font-bold tracking-widest ${activeTab === 'all' ? 'text-white' : ''}`}>全体マップ</span>
+                            </button>
+                            {projects.map((p: any) => (
+                                <button
+                                    key={p.id}
+                                    onClick={() => setActiveTab(p.id)}
+                                    className={`p-3 border-2 font-inherit transition-all flex items-center gap-3 relative overflow-hidden group
+                                        ${activeTab === p.id ? 'border-white bg-[#111] scale-105 shadow-[0_0_15px_rgba(255,255,255,0.2)]' : 'border-gray-700 bg-black text-gray-500 hover:border-gray-400'}`}
+                                >
+                                    {activeTab === p.id && <span className="text-[var(--active-color)] animate-pulse absolute left-1">▶︎</span>}
+                                    <span className={`text-2xl ml-3 ${activeTab === p.id ? '' : 'filter grayscale opacity-50'}`}>🏰</span>
+                                    <span className={`font-bold tracking-widest ${activeTab === p.id ? 'text-white' : ''}`}>{p.name}</span>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* 👥 パーティ名簿 */}
+                    <div className="retro-window">
+                        <h3 className="text-gray-400 mb-3 text-lg border-b border-gray-600 pb-1">👥 パーティ名簿</h3>
+                        {partyMembers.length === 0 ? (
+                            <div className="text-sm text-gray-500">まだ誰もいません</div>
+                        ) : (
+                            <div className="flex flex-wrap gap-2">
+                                {partyMembers.map((name, i) => (
+                                    <div key={i} className="flex items-center gap-2 bg-gray-900 border border-gray-700 p-1 px-2 rounded-sm cursor-help" title="タスク担当者として登録済みのメンバー">
+                                        <img 
+                                            src={getFallbackAvatar(name as string)} 
+                                            alt={name as string} 
+                                            className="w-5 h-5 pixelated-avatar border border-black object-cover" 
+                                        />
+                                        <span className="text-sm text-gray-300">{name as string}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* アーカイブ */}
+                    {completedTasks.length > 0 && (
+                        <div className="mt-8 border-t-2 border-dashed border-gray-600 pt-4">
+                            <h3 className="text-gray-500 mb-4 text-lg">🪦 討伐完了（アーカイブ）</h3>
+                            <ul className="list-none p-0 m-0 opacity-50">
+                                {completedTasks.map((task: any) => {
+                                    const assignees = (task.assignee_name || '担当未定').split(/[,、\s]+/).filter(Boolean).slice(0, 5);
+                                    return (
+                                        <li key={task.id} className="border-b border-gray-800 transition-colors hover:bg-[var(--hover-bg)]">
+                                            <div className="flex items-center p-3 gap-4">
+                                                <div className="relative shrink-0 flex items-center">
+                                                    <input type="checkbox" checked={true} onChange={(e) => markCompleted(task, e.target.checked)} className="appearance-none w-6 h-6 border-2 border-gray-600 bg-black cursor-pointer align-middle" />
+                                                    <span className="absolute top-[-4px] left-[2px] text-xl text-gray-400 pointer-events-none">✔</span>
+                                                </div>
+                                                <div className="grow text-lg text-gray-500 line-through flex items-center flex-wrap gap-2">
+                                                    <span
+                                                        className="cursor-pointer hover:underline decoration-gray-500 underline-offset-4"
+                                                        onClick={() => toggleTaskExpansion(task.id)}
+                                                        title="クリックで作戦会議（コメント）を開く"
+                                                    >
+                                                        {task.title}
+                                                    </span>
+                                                    {task.completed_at && <span className="text-xs text-gray-600 no-underline bg-gray-900 px-2 py-1 rounded">完了: {new Date(task.completed_at).toLocaleDateString()}</span>}
+                                                    <span
+                                                        className="ml-auto text-xs text-gray-700 hover:text-gray-400 cursor-pointer"
+                                                        onClick={() => toggleTaskExpansion(task.id)}
+                                                        title="作戦会議"
+                                                    >
+                                                        💬
+                                                    </span>
+                                                </div>
+                                                <div className="flex flex-col items-center gap-1 shrink-0 justify-end w-[60px] relative" onClick={(e) => {
+                                                    e.preventDefault();
+                                                    setEditingAssigneeId(task.id);
+                                                    setEditAssigneeValue(task.assignee_name || '');
+                                                }}>
+                                                    {editingAssigneeId === task.id ? (
+                                                        <div className="flex items-center gap-1 w-[120px] mt-1 bg-black border border-gray-600 p-1 absolute bottom-0 right-0 z-10 shadow-lg">
+                                                            <span className="text-gray-400 text-[10px] animate-pulse">▶︎</span>
+                                                            <input
+                                                                autoFocus
+                                                                type="text"
+                                                                list="party-members"
+                                                                value={editAssigneeValue}
+                                                                onChange={(e) => setEditAssigneeValue(e.target.value)}
+                                                                onBlur={() => updateAssignee(task.id)}
+                                                                onKeyDown={(e) => {
+                                                                    if (e.key === 'Enter') updateAssignee(task.id)
+                                                                }}
+                                                                className="w-full text-[10px] text-gray-300 bg-transparent outline-none"
+                                                            />
+                                                        </div>
+                                                    ) : (
+                                                        <>
+                                                            <div className="flex -space-x-2 hover:scale-105 transition-transform cursor-pointer" title="クリックして担当者を変更">
+                                                                {assignees.map((name: string, i: number) => (
+                                                                    <img key={i} src={getAvatarUrl(name)} alt={name} className="w-6 h-6 pixelated-avatar grayscale border border-gray-800" style={{ zIndex: 10 - i }} />
+                                                                ))}
+                                                            </div>
+                                                            <span className="text-[10px] text-gray-600 truncate w-full text-center cursor-pointer hover:text-gray-400" title="クリックして担当者を変更">
+                                                                {task.assignee_name ? task.assignee_name : '担当未定'}
+                                                            </span>
+                                                        </>
+                                                    )}
+                                                </div>
+                                            </div>
+
+                                            {/* 💬 作戦会議（コメント）エリア展開 - アーカイブ版 */}
+                                            {expandedTaskId === task.id && (
+                                                <div className="bg-[#111] p-3 border-t border-[#222] ml-9 mr-3 mb-3 rounded-sm border border-dashed border-[#444] opacity-80">
+                                                    <h4 className="text-gray-500 mb-2 text-xs flex items-center gap-2">
+                                                        <span>💬 作戦会議（過去の記録）</span>
+                                                    </h4>
+
+                                                    <div className="flex flex-col gap-2 mb-3 max-h-[200px] overflow-y-auto pr-2">
+                                                        {comments.length === 0 ? (
+                                                            <div className="text-gray-600 text-[10px] text-center py-1">記録はありません。</div>
+                                                        ) : (
+                                                            comments.map((comment: any) => (
+                                                                <div key={comment.id} className="flex gap-2">
+                                                                    <img src={`https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(comment.user_email)}`} alt="Avatar" className="w-6 h-6 pixelated-avatar shrink-0 border border-[#444] grayscale" />
+                                                                    <div className="bg-black border border-[#333] p-1.5 rounded-sm relative grow">
+                                                                        <div className="absolute top-2 -left-1.5 w-0 h-0 border-t-[3px] border-t-transparent border-r-[6px] border-r-[#333] border-b-[3px] border-b-transparent"></div>
+                                                                        <div className="flex justify-between items-baseline mb-0.5">
+                                                                            <span className="text-[10px] text-gray-500">{comment.user_email?.split('@')[0]}</span>
+                                                                            <span className="text-[8px] text-gray-700">
+                                                                                {new Date(comment.created_at).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                                                            </span>
+                                                                        </div>
+                                                                        <p className="text-xs text-gray-400 whitespace-pre-wrap leading-relaxed">{comment.content}</p>
+                                                                    </div>
+                                                                </div>
+                                                            ))
+                                                        )}
+                                                    </div>
+
+                                                    <form onSubmit={(e) => submitComment(e, task.id)} className="flex gap-2">
+                                                        <input
+                                                            type="text"
+                                                            value={newComment}
+                                                            onChange={(e) => setNewComment(e.target.value)}
+                                                            placeholder="追記する..."
+                                                            className="grow bg-black border border-[#444] p-1.5 text-gray-400 text-xs outline-none focus:border-gray-500 transition-colors"
+                                                        />
+                                                        <button
+                                                            type="submit"
+                                                            disabled={!newComment.trim()}
+                                                            className="px-3 bg-black border border-[#444] text-gray-400 text-xs hover:bg-[#222] hover:text-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                                        >
+                                                            追記
+                                                        </button>
+                                                    </form>
+                                                </div>
+                                            )}
+                                        </li>
+                                    );
+                                })}
+                            </ul>
+                        </div>
+                    )}
+                </div>
+            </div>
+
+        </main>
+    )
+}

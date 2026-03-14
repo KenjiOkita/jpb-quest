@@ -1,0 +1,90 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: #000000;
+  --color-foreground: #ffffff;
+}
+
+@layer base {
+  :root {
+    --bg-color: #000000;
+    --text-color: #ffffff;
+    --border-color: #ffffff;
+    --danger-color: #ff3333;
+    --active-color: #ffffff;
+    --progress-color: #ff5555;
+    --muted-color: #aaaaaa;
+    --hover-bg: #222222;
+  }
+
+  body {
+    background-color: #55ee33;
+    background-image: url('/assets/dq_bright_field.png');
+    background-repeat: repeat;
+    background-size: 1600px;
+    /* Make the tiles truly massive */
+    background-attachment: fixed;
+    image-rendering: pixelated;
+    /* Essential for the NES feel */
+    color: var(--text-color);
+    font-family: var(--font-dot-gothic), sans-serif;
+    padding: 0;
+    margin: 0;
+    line-height: 1.6;
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+  }
+
+  main {
+    width: 100%;
+    max-width: 1800px;
+    padding: 40px 20px;
+    background: rgba(0, 0, 0, 0.35);
+    min-height: 100vh;
+    box-shadow: 0 0 100px rgba(0, 0, 0, 0.8);
+  }
+
+  /* Browser Scrollbar Styling */
+  ::-webkit-scrollbar {
+    height: 8px;
+    width: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: #000;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #555;
+    border: 2px solid #000;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #888;
+  }
+}
+
+@layer components {
+  .retro-window {
+    @apply border-4 border-white rounded-none bg-black mb-6 p-6 relative;
+    /* Dragon Quest style double-border look */
+    box-shadow: 0 0 0 4px #000, 0 0 0 8px #fff;
+    margin: 8px 4px;
+  }
+
+  .retro-title {
+    @apply border-b-2 border-dashed border-[#fff] pb-2 mb-4 text-2xl font-bold;
+  }
+
+  .pixelated-avatar {
+    @apply border-2 border-[#fff] object-cover;
+    image-rendering: pixelated;
+  }
+
+  /* ドット絵変換用の小さいサイズ指定 - canvasで縮小後に使う */
+  .pixelated-avatar-tiny {
+    image-rendering: pixelated;
+    object-fit: cover;
+  }
+}
