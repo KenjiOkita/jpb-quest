@@ -1037,7 +1037,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                                         <>
                                                             <div className="flex -space-x-2 hover:scale-105 transition-transform cursor-pointer" title="クリックして担当者を変更">
                                                                 {assignees.map((name: string, i: number) => (
-                                                                    <img key={i} src={getAvatarUrl(name)} alt={name} className="w-6 h-6 pixelated-avatar grayscale border border-gray-800" style={{ zIndex: 10 - i }} />
+                                                                    <img key={i} src={getFallbackAvatar(name)} alt={name} className="w-6 h-6 pixelated-avatar grayscale border border-gray-800" style={{ zIndex: 10 - i }} />
                                                                 ))}
                                                             </div>
                                                             <span className="text-[10px] text-gray-600 truncate w-full text-center cursor-pointer hover:text-gray-400" title="クリックして担当者を変更">
