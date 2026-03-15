@@ -1206,17 +1206,54 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
         }
     }
 
-    // タスクを未完了と完了済みに分ける
-    const visibleTasks = useMemo(() => {
-        const filtered = activeTab === 'all' 
-            ? tasks.filter((t: any) => t.status !== 'completed') 
-            : tasks.filter((t: any) => t.project_id === activeTab && t.status !== 'completed')
-        // Sort by order_index primarily
-        return filtered.sort((a: any, b: any) => (a.order_index || 0) - (b.order_index || 0))
+    // タスクを表示対象（全体 or プロジェクト単位）で絞り込み
+    const scopedTasks = useMemo(() => {
+        if (activeTab === 'all') return tasks
+        return tasks.filter((t: any) => t.project_id === activeTab)
     }, [tasks, activeTab])
 
-    const activeTasks = visibleTasks.filter((t: any) => t.status !== 'completed')
-    const completedTasks = visibleTasks.filter((t: any) => t.status === 'completed')
+    // 未完了タスク（並び順は手動ソート順）
+    const activeTasks = useMemo(() => {
+        return scopedTasks
+            .filter((t: any) => t.status !== 'completed')
+            .sort((a: any, b: any) => (a.order_index || 0) - (b.order_index || 0))
+    }, [scopedTasks])
+
+    // 完了タスク（新しい完了日時順）
+    const completedTasks = useMemo(() => {
+        const toTime = (value?: string | null) => {
+            if (!value) return 0
+            const time = new Date(value).getTime()
+            return Number.isNaN(time) ? 0 : time
+        }
+
+        return scopedTasks
+            .filter((t: any) => t.status === 'completed')
+            .sort((a: any, b: any) => {
+                const timeA = toTime(a.completed_at || a.updated_at || a.created_at)
+                const timeB = toTime(b.completed_at || b.updated_at || b.created_at)
+                return timeB - timeA
+            })
+    }, [scopedTasks])
+
+    const completedTasksByProject = useMemo(() => {
+        if (activeTab !== 'all') return []
+
+        const grouped: Record<string, any[]> = {}
+        completedTasks.forEach((task: any) => {
+            const projectId = task.project_id || 'unknown'
+            if (!grouped[projectId]) grouped[projectId] = []
+            grouped[projectId].push(task)
+        })
+
+        return Object.entries(grouped)
+            .map(([projectId, groupedTasks]) => ({
+                projectId,
+                projectName: projects.find((p: any) => p.id === projectId)?.name || '不明な拠点',
+                tasks: groupedTasks
+            }))
+            .sort((a, b) => a.projectName.localeCompare(b.projectName, 'ja'))
+    }, [activeTab, completedTasks, projects])
 
     // ボトルネック（緊急）は priority: 'boss' かつ status: 'blocked' か status: 'progress' 的なものを想定
     const bottleneckTasks = activeTasks.filter((t: any) => t.priority === 'boss')
@@ -1672,157 +1709,183 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                     {completedTasks.length > 0 && (
                         <div className="mt-8 border-t-2 border-dashed border-gray-600 pt-4">
                             <h3 className="text-gray-500 mb-1 text-lg">🪦 討伐完了（アーカイブ）</h3>
-                            <div className="text-[10px] text-gray-600 mb-4">完了した日時と完了者を記録しています（クリックで作戦会議も表示）。</div>
-                            <ul className="list-none p-0 m-0 opacity-50">
-                                {completedTasks.map((task: any) => {
-                                    const isEditingTaskTitle = editingTaskId === task.id;
-                                    return (
-                                        <li key={task.id} className="border-b border-gray-800 transition-colors hover:bg-[var(--hover-bg)]">
-                                            <div className="flex items-start md:items-center p-2 md:p-3 gap-2 md:gap-4">
-                                                <div className="relative shrink-0 flex items-center">
-                                                    <input type="checkbox" checked={true} onChange={(e) => markCompleted(task, e.target.checked)} className="appearance-none w-5 h-5 md:w-6 md:h-6 border-2 border-gray-600 bg-black cursor-pointer align-middle" />
-                                                    <span className="absolute top-[-4px] left-[2px] text-lg md:text-xl text-gray-400 pointer-events-none">✔</span>
-                                                </div>
-                                                 <div className="grow text-sm md:text-lg text-gray-500 line-through flex items-center flex-wrap gap-1.5 md:gap-2 min-w-0">
-                                                    {isEditingTaskTitle ? (
-                                                        <div
-                                                            className="flex items-center gap-2 min-w-[280px] flex-1"
-                                                            style={{ textDecoration: 'none' }}
-                                                        >
-                                                            <input
-                                                                type="text"
-                                                                value={editTaskTitle}
-                                                                onChange={(e) => setEditTaskTitle(e.target.value)}
-                                                                onKeyDown={(e) => {
-                                                                    if (e.key === 'Enter') {
-                                                                        e.preventDefault()
-                                                                        saveTaskTitle(task.id)
-                                                                    }
-                                                                    if (e.key === 'Escape') {
-                                                                        cancelTaskTitleEdit()
-                                                                    }
-                                                                }}
-                                                                autoFocus
-                                                                className="min-w-0 flex-1 bg-[#1a1200] border border-[var(--active-color)] px-3 py-2 text-white outline-none"
-                                                            />
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => saveTaskTitle(task.id)}
-                                                                className="shrink-0 px-3 py-2 text-xs font-bold bg-[var(--active-color)] text-black border border-yellow-200 hover:brightness-110"
-                                                            >
-                                                                保存
-                                                            </button>
-                                                            <button
-                                                                type="button"
-                                                                onClick={cancelTaskTitleEdit}
-                                                                className="shrink-0 px-3 py-2 text-xs font-bold border border-gray-600 text-gray-300 hover:border-gray-400 hover:text-white"
-                                                            >
-                                                                戻す
-                                                            </button>
+                            <div className="text-[10px] text-gray-600 mb-4">
+                                {activeTab === 'all'
+                                    ? '各拠点ごとに完了したクエストを一覧表示しています。'
+                                    : '完了した日時と完了者を記録しています（クリックで作戦会議も表示）。'}
+                            </div>
+                            {activeTab === 'all' ? (
+                                <div className="flex flex-col gap-3">
+                                    {completedTasksByProject.map((group: any) => (
+                                        <div key={group.projectId} className="border border-gray-800 bg-black/40">
+                                            <div className="px-2 py-1 text-[11px] text-gray-300 border-b border-gray-800 font-bold tracking-wide">
+                                                🏰 {group.projectName} ({group.tasks.length})
+                                            </div>
+                                            <ul className="list-none p-0 m-0">
+                                                {group.tasks.map((task: any) => (
+                                                    <li key={task.id} className="px-2 py-1.5 border-b border-gray-900 last:border-b-0">
+                                                        <div className="text-[11px] text-gray-300 line-through break-words">{task.title}</div>
+                                                        <div className="text-[10px] text-gray-500 mt-0.5">
+                                                            完了: {task.completed_at ? new Date(task.completed_at).toLocaleString('ja-JP') : '日時未記録'}
                                                         </div>
-                                                    ) : (
-                                                        <>
-                                                            <span
-                                                                className="cursor-pointer hover:underline decoration-gray-500 underline-offset-4"
-                                                                onClick={() => toggleTaskExpansion(task.id)}
-                                                            >
-                                                                {task.title}
-                                                            </span>
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => beginTaskTitleEdit(task)}
-                                                                className="inline-flex items-center gap-1 rounded-sm px-2 py-1 text-[10px] font-bold border border-[#9d7b3b] bg-[#231b0c] text-[#f2d78f] hover:bg-[#2e2411] transition-colors no-underline"
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <ul className="list-none p-0 m-0 opacity-50">
+                                    {completedTasks.map((task: any) => {
+                                        const isEditingTaskTitle = editingTaskId === task.id;
+                                        return (
+                                            <li key={task.id} className="border-b border-gray-800 transition-colors hover:bg-[var(--hover-bg)]">
+                                                <div className="flex items-start md:items-center p-2 md:p-3 gap-2 md:gap-4">
+                                                    <div className="relative shrink-0 flex items-center">
+                                                        <input type="checkbox" checked={true} onChange={(e) => markCompleted(task, e.target.checked)} className="appearance-none w-5 h-5 md:w-6 md:h-6 border-2 border-gray-600 bg-black cursor-pointer align-middle" />
+                                                        <span className="absolute top-[-4px] left-[2px] text-lg md:text-xl text-gray-400 pointer-events-none">✔</span>
+                                                    </div>
+                                                     <div className="grow text-sm md:text-lg text-gray-500 line-through flex items-center flex-wrap gap-1.5 md:gap-2 min-w-0">
+                                                        {isEditingTaskTitle ? (
+                                                            <div
+                                                                className="flex items-center gap-2 min-w-[280px] flex-1"
                                                                 style={{ textDecoration: 'none' }}
                                                             >
-                                                                <span>✎</span>
-                                                                <span>題名変更</span>
-                                                            </button>
-                                                        </>
-                                                    )}
-                                                    {task.completed_at && (
-                                                        <span className="text-xs text-gray-600 no-underline bg-gray-900 px-2 py-1 rounded">
-                                                            完了: {new Date(task.completed_at).toLocaleString('ja-JP')}
-                                                        </span>
-                                                    )}
-                                                    <span className="text-xs text-gray-600 no-underline bg-gray-900 px-2 py-1 rounded">
-                                                        完了者: {getDisplayNameByUserId(task.completed_by_user_id)}
-                                                    </span>
-                                                </div>
-                                                <div className="flex flex-col items-center gap-1 shrink-0 justify-end w-[80px]">
-                                                    {(() => {
-                                                        const profile = task.assignee_id ? userProfiles[task.assignee_id] : null;
-                                                        const avatar = profile?.avatar_url || getFallbackAvatar(task.assignee_name || 'unknown');
-                                                        const name = profile?.display_name || task.assignee_name || '担当未定';
-                                                        const isUnassigned = isUnassignedTask(task);
-                                                        return (
-                                                            <>
-                                                                {isUnassigned ? (
-                                                                    <div className="w-6 h-6 flex items-center justify-center border border-gray-600 bg-[#1a1a1a] text-gray-300 text-sm font-bold leading-none">?</div>
-                                                                ) : (
-                                                                    <img src={avatar} alt={name} className="w-6 h-6 pixelated-avatar grayscale border border-gray-800 object-cover" title={name} />
-                                                                )}
-                                                                <span className="text-[9px] text-gray-700 truncate w-full text-center">
-                                                                    {isUnassigned ? '未アサイン' : name}
-                                                                </span>
-                                                            </>
-                                                        );
-                                                    })()}
-                                                </div>
-                                            </div>
-
-                                            {/* 💬 作戦会議（コメント）エリア展開 - アーカイブ版 */}
-                                            {expandedTaskId === task.id && (
-                                                <div data-comment-panel="true" className="comment-panel-enter bg-[#111] p-3 border-t border-[#222] ml-9 mr-3 mb-3 rounded-sm border border-dashed border-[#444] opacity-80">
-                                                    <h4 className="text-gray-500 mb-2 text-xs flex items-center gap-2">
-                                                        <span>💬 作戦会議（過去の記録）</span>
-                                                    </h4>
-
-                                                    <div className="flex flex-col gap-2 mb-3 pr-2">
-                                                        {comments.length === 0 ? (
-                                                            <div className="text-gray-600 text-[10px] text-center py-1">記録はありません。</div>
+                                                                <input
+                                                                    type="text"
+                                                                    value={editTaskTitle}
+                                                                    onChange={(e) => setEditTaskTitle(e.target.value)}
+                                                                    onKeyDown={(e) => {
+                                                                        if (e.key === 'Enter') {
+                                                                            e.preventDefault()
+                                                                            saveTaskTitle(task.id)
+                                                                        }
+                                                                        if (e.key === 'Escape') {
+                                                                            cancelTaskTitleEdit()
+                                                                        }
+                                                                    }}
+                                                                    autoFocus
+                                                                    className="min-w-0 flex-1 bg-[#1a1200] border border-[var(--active-color)] px-3 py-2 text-white outline-none"
+                                                                />
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => saveTaskTitle(task.id)}
+                                                                    className="shrink-0 px-3 py-2 text-xs font-bold bg-[var(--active-color)] text-black border border-yellow-200 hover:brightness-110"
+                                                                >
+                                                                    保存
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={cancelTaskTitleEdit}
+                                                                    className="shrink-0 px-3 py-2 text-xs font-bold border border-gray-600 text-gray-300 hover:border-gray-400 hover:text-white"
+                                                                >
+                                                                    戻す
+                                                                </button>
+                                                            </div>
                                                         ) : (
-                                                            comments.map((comment: any) => (
-                                                                <div key={comment.id} className="flex gap-2">
-                                                                    <img src={`https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(comment.user_email)}`} alt="Avatar" className="w-6 h-6 pixelated-avatar shrink-0 border border-[#444] grayscale" />
-                                                                    <div className="bg-black border border-[#333] p-1.5 rounded-sm relative grow">
-                                                                        <div className="absolute top-2 -left-1.5 w-0 h-0 border-t-[3px] border-t-transparent border-r-[6px] border-r-[#333] border-b-[3px] border-b-transparent"></div>
-                                                                        <div className="flex justify-between items-baseline mb-0.5">
-                                                                            <span className="text-[10px] text-gray-500">{comment.user_email?.split('@')[0]}</span>
-                                                                            <span className="text-[8px] text-gray-700">
-                                                                                {new Date(comment.created_at).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                                                                            </span>
-                                                                        </div>
-                                                                        <p className="text-xs text-gray-400 whitespace-pre-wrap leading-relaxed">
-                                                                            {cleanCommentContent(comment.content, comment.image_url)}
-                                                                        </p>
-                                                                    </div>
-                                                                </div>
-                                                            ))
+                                                            <>
+                                                                <span
+                                                                    className="cursor-pointer hover:underline decoration-gray-500 underline-offset-4"
+                                                                    onClick={() => toggleTaskExpansion(task.id)}
+                                                                >
+                                                                    {task.title}
+                                                                </span>
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => beginTaskTitleEdit(task)}
+                                                                    className="inline-flex items-center gap-1 rounded-sm px-2 py-1 text-[10px] font-bold border border-[#9d7b3b] bg-[#231b0c] text-[#f2d78f] hover:bg-[#2e2411] transition-colors no-underline"
+                                                                    style={{ textDecoration: 'none' }}
+                                                                >
+                                                                    <span>✎</span>
+                                                                    <span>題名変更</span>
+                                                                </button>
+                                                            </>
                                                         )}
+                                                        {task.completed_at && (
+                                                            <span className="text-xs text-gray-600 no-underline bg-gray-900 px-2 py-1 rounded">
+                                                                完了: {new Date(task.completed_at).toLocaleString('ja-JP')}
+                                                            </span>
+                                                        )}
+                                                        <span className="text-xs text-gray-600 no-underline bg-gray-900 px-2 py-1 rounded">
+                                                            完了者: {getDisplayNameByUserId(task.completed_by_user_id)}
+                                                        </span>
                                                     </div>
-
-                                                    <form onSubmit={(e) => submitComment(e, task.id)} className="flex gap-2">
-                                                        <input
-                                                            type="text"
-                                                            value={newComment}
-                                                            onChange={(e) => setNewComment(e.target.value)}
-                                                            placeholder="追記する..."
-                                                            className="grow bg-black border border-[#444] p-1.5 text-gray-400 text-xs outline-none focus:border-gray-500 transition-colors"
-                                                        />
-                                                        <button
-                                                            type="submit"
-                                                            disabled={!newComment.trim()}
-                                                            className="px-3 bg-black border border-[#444] text-gray-400 text-xs hover:bg-[#222] hover:text-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                                        >
-                                                            追記
-                                                        </button>
-                                                    </form>
+                                                    <div className="flex flex-col items-center gap-1 shrink-0 justify-end w-[80px]">
+                                                        {(() => {
+                                                            const profile = task.assignee_id ? userProfiles[task.assignee_id] : null;
+                                                            const avatar = profile?.avatar_url || getFallbackAvatar(task.assignee_name || 'unknown');
+                                                            const name = profile?.display_name || task.assignee_name || '担当未定';
+                                                            const isUnassigned = isUnassignedTask(task);
+                                                            return (
+                                                                <>
+                                                                    {isUnassigned ? (
+                                                                        <div className="w-6 h-6 flex items-center justify-center border border-gray-600 bg-[#1a1a1a] text-gray-300 text-sm font-bold leading-none">?</div>
+                                                                    ) : (
+                                                                        <img src={avatar} alt={name} className="w-6 h-6 pixelated-avatar grayscale border border-gray-800 object-cover" title={name} />
+                                                                    )}
+                                                                    <span className="text-[9px] text-gray-700 truncate w-full text-center">
+                                                                        {isUnassigned ? '未アサイン' : name}
+                                                                    </span>
+                                                                </>
+                                                            );
+                                                        })()}
+                                                    </div>
                                                 </div>
-                                            )}
-                                        </li>
-                                    );
-                                })}
-                            </ul>
+
+                                                {/* 💬 作戦会議（コメント）エリア展開 - アーカイブ版 */}
+                                                {expandedTaskId === task.id && (
+                                                    <div data-comment-panel="true" className="comment-panel-enter bg-[#111] p-3 border-t border-[#222] ml-9 mr-3 mb-3 rounded-sm border border-dashed border-[#444] opacity-80">
+                                                        <h4 className="text-gray-500 mb-2 text-xs flex items-center gap-2">
+                                                            <span>💬 作戦会議（過去の記録）</span>
+                                                        </h4>
+
+                                                        <div className="flex flex-col gap-2 mb-3 pr-2">
+                                                            {comments.length === 0 ? (
+                                                                <div className="text-gray-600 text-[10px] text-center py-1">記録はありません。</div>
+                                                            ) : (
+                                                                comments.map((comment: any) => (
+                                                                    <div key={comment.id} className="flex gap-2">
+                                                                        <img src={`https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(comment.user_email)}`} alt="Avatar" className="w-6 h-6 pixelated-avatar shrink-0 border border-[#444] grayscale" />
+                                                                        <div className="bg-black border border-[#333] p-1.5 rounded-sm relative grow">
+                                                                            <div className="absolute top-2 -left-1.5 w-0 h-0 border-t-[3px] border-t-transparent border-r-[6px] border-r-[#333] border-b-[3px] border-b-transparent"></div>
+                                                                            <div className="flex justify-between items-baseline mb-0.5">
+                                                                                <span className="text-[10px] text-gray-500">{comment.user_email?.split('@')[0]}</span>
+                                                                                <span className="text-[8px] text-gray-700">
+                                                                                    {new Date(comment.created_at).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                                                                </span>
+                                                                            </div>
+                                                                            <p className="text-xs text-gray-400 whitespace-pre-wrap leading-relaxed">
+                                                                                {cleanCommentContent(comment.content, comment.image_url)}
+                                                                            </p>
+                                                                        </div>
+                                                                    </div>
+                                                                ))
+                                                            )}
+                                                        </div>
+
+                                                        <form onSubmit={(e) => submitComment(e, task.id)} className="flex gap-2">
+                                                            <input
+                                                                type="text"
+                                                                value={newComment}
+                                                                onChange={(e) => setNewComment(e.target.value)}
+                                                                placeholder="追記する..."
+                                                                className="grow bg-black border border-[#444] p-1.5 text-gray-400 text-xs outline-none focus:border-gray-500 transition-colors"
+                                                            />
+                                                            <button
+                                                                type="submit"
+                                                                disabled={!newComment.trim()}
+                                                                className="px-3 bg-black border border-[#444] text-gray-400 text-xs hover:bg-[#222] hover:text-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                                            >
+                                                                追記
+                                                            </button>
+                                                        </form>
+                                                    </div>
+                                                )}
+                                            </li>
+                                        );
+                                    })}
+                                </ul>
+                            )}
                         </div>
                     )}
                 </div>
