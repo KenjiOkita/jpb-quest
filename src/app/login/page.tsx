@@ -1,18 +1,45 @@
 'use client'
 
-import { useState } from 'react'
+import { useFormStatus } from 'react-dom'
 import { login, signup } from './actions'
 
-export default function LoginPage() {
-    const [isLoading, setIsLoading] = useState(false)
+function SubmitButton({ label, loadingLabel, isPrimary = true }: { label: string, loadingLabel: string, isPrimary?: boolean }) {
+    const { pending } = useFormStatus()
+    
+    if (isPrimary) {
+        return (
+            <button
+                type="submit"
+                formAction={login}
+                disabled={pending}
+                className={`border-4 border-white bg-white text-black py-4 px-4 text-xl font-bold transition-all active:scale-95 ${pending ? 'opacity-50 cursor-wait' : 'hover:bg-gray-200 cursor-pointer shadow-[4px_4px_0px_0px_rgba(255,255,255,0.3)]'}`}
+            >
+                {pending ? loadingLabel : label}
+            </button>
+        )
+    }
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-black relative z-10">
-            <div className="retro-window max-w-md w-full relative z-20">
-                <h1 className="retro-title text-center text-3xl mb-6">JPB クエスト</h1>
-                <p className="text-center mb-6 text-gray-300">ギルドへのログイン（冒険者認証）</p>
+        <button
+            type="submit"
+            formAction={signup}
+            disabled={pending}
+            className={`border-2 border-dashed border-gray-400 text-gray-300 py-3 px-4 mt-2 transition-all active:scale-95 ${pending ? 'opacity-50 cursor-wait' : 'hover:border-white hover:text-white cursor-pointer'}`}
+        >
+            {pending ? loadingLabel : label}
+        </button>
+    )
+}
 
-                <form className="flex flex-col gap-4" onSubmit={() => setIsLoading(true)}>
+export default function LoginPage() {
+    return (
+        <div className="min-h-screen flex items-center justify-center relative z-[9999] pointer-events-auto bg-black overflow-hidden">
+            {/* フォームコンテナ */}
+            <div className="retro-window max-w-md w-full relative z-[10000] bg-black p-8 shadow-2xl border-4 border-white mx-4">
+                <h1 className="retro-title text-center text-3xl mb-6">JPB クエスト</h1>
+                <p className="text-center mb-6 text-gray-300 font-bold">ギルドへのログイン（冒険者認証）</p>
+
+                <form className="flex flex-col gap-4 relative z-[10001]">
                     <div className="flex flex-col gap-1">
                         <label htmlFor="email" className="text-sm">📧 魔法のメールアドレス</label>
                         <input
@@ -20,7 +47,8 @@ export default function LoginPage() {
                             name="email"
                             type="email"
                             required
-                            className="bg-black border-2 border-white p-2 text-white outline-none focus:border-[var(--active-color)] transition-colors font-inherit"
+                            placeholder="hero@example.com"
+                            className="bg-black border-2 border-white p-3 text-white outline-none focus:border-blue-400 transition-colors font-inherit text-lg"
                         />
                     </div>
 
@@ -31,33 +59,24 @@ export default function LoginPage() {
                             name="password"
                             type="password"
                             required
-                            className="bg-black border-2 border-white p-2 text-white outline-none focus:border-[var(--active-color)] transition-colors font-inherit"
+                            placeholder="********"
+                            className="bg-black border-2 border-white p-3 text-white outline-none focus:border-blue-400 transition-colors font-inherit text-lg"
                         />
                         <a href="/reset-password" params-recovery="true" className="text-[10px] text-gray-500 hover:text-white underline mt-1 text-right">パスワードを忘れた（教会の祈り）</a>
                     </div>
 
-                    <button
-                        formAction={login}
-                        disabled={isLoading}
-                        className={`border-4 border-white bg-white text-black py-2 px-4 text-xl font-bold transition-colors ${isLoading ? 'opacity-50 cursor-wait' : 'hover:bg-gray-200 cursor-pointer'}`}
-                    >
-                        {isLoading ? '詠唱中...' : 'ログイン（冒険を再開する）'}
-                    </button>
+                    <SubmitButton label="ログイン（冒険を再開する）" loadingLabel="詠唱中..." />
 
-                    <div className="text-center mt-4 text-sm text-gray-400">
+                    <div className="text-center mt-6 text-sm text-gray-400">
                         --- まだ冒険者登録をしていない場合 ---
                     </div>
 
-                    <button
-                        formAction={signup}
-                        disabled={isLoading}
-                        className={`border-2 border-dashed border-gray-400 text-gray-300 py-2 px-4 mt-2 transition-colors ${isLoading ? 'opacity-50 cursor-wait' : 'hover:border-white hover:text-white cursor-pointer'}`}
-                    >
-                        {isLoading ? '登録中...' : '新規登録（ギルドに加入する）'}
-                    </button>
-                    {isLoading && <p className="text-center text-[10px] mt-2 animate-pulse text-gray-400">少し時間がかかる場合があります（MP消費中...）</p>}
+                    <SubmitButton label="新規登録（ギルドに加入する）" loadingLabel="登録中..." isPrimary={false} />
                 </form>
             </div>
+            
+            {/* 背景の遮断レイヤーを明示的に背面に送る */}
+            <div className="fixed inset-0 bg-black/60 -z-10 pointer-events-none"></div>
         </div>
     )
 }

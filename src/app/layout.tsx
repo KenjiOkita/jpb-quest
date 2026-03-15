@@ -20,7 +20,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="ja">
-      <body className={`${dotGothic.variable} antialiased max-w-4xl mx-auto`}>
+      <body className={`${dotGothic.variable} antialiased`}>
         {children}
       </body>
     </html>
