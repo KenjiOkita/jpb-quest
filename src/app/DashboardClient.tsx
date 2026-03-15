@@ -1479,7 +1479,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
 
             {bottleneckTasks.length > 0 && (
                 <div className="retro-window border-[var(--danger-color)] shadow-[0_0_20px_rgba(255,51,51,0.2)]">
-                    <h2 className="retro-title text-[var(--danger-color)] border-[var(--danger-color)] bg-[rgba(255,51,51,0.1)]">🚨 緊急クエスト（BOSS ENCOUNTER）</h2>
+                    <h2 className="retro-title pixel-heading-jp text-[var(--danger-color)] border-[var(--danger-color)] bg-[rgba(255,51,51,0.1)]">🚨 緊急クエスト（BOSS ENCOUNTER）</h2>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                         {bottleneckTasks.map((task: any) => {
                             const avatar = getAssigneeAvatar(task.assignee_id, task.assignee_name);

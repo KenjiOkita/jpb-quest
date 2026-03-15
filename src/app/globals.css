@@ -1,3 +1,4 @@
+@import url('https://fonts.googleapis.com/css2?family=DotGothic16&display=swap');
 @import "tailwindcss";
 
 @theme {
@@ -89,11 +90,18 @@
   }
 
   .hero-name-pixel {
-    font-family: "MS Gothic", "Osaka-Mono", "Courier New", "Menlo", "Monaco", monospace;
+    font-family: "DotGothic16", "MS Gothic", "Osaka-Mono", "Courier New", "Menlo", "Monaco", monospace;
     letter-spacing: 0.08em;
     font-weight: 700;
-    -webkit-font-smoothing: none;
+    -webkit-font-smoothing: none !important;
     font-smooth: never;
+    text-rendering: optimizeSpeed;
+  }
+
+  .pixel-heading-jp {
+    font-family: "DotGothic16", "MS Gothic", "Osaka-Mono", monospace;
+    letter-spacing: 0.06em;
+    -webkit-font-smoothing: none !important;
     text-rendering: optimizeSpeed;
   }
 }
