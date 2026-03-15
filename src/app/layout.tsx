@@ -5,12 +5,15 @@ export const metadata: Metadata = {
   title: 'JPBクエスト',
   description: 'レトロRPG風タスク管理アプリ',
   manifest: '/manifest.json',
-  themeColor: '#000000',
   appleWebApp: {
     capable: true,
     statusBarStyle: 'black-translucent',
     title: 'JPBクエスト',
   },
+}
+
+export const viewport = {
+  themeColor: '#000000',
 }
 
 export default function RootLayout({
