@@ -51,6 +51,7 @@ function LoginContent() {
         if (code === 'network') return '通信エラーが発生しました。電波状況を確認して再試行してください。'
         if (code === 'weak_password') return 'パスワードが弱すぎます。より長く複雑なものを設定してください。'
         if (code === 'user_exists') return 'このメールアドレスはすでに登録済みです。ログインをお試しください。'
+        if (code === 'invalid_recovery_link') return 'パスワード再設定リンクが無効か期限切れです。もう一度やり直してください。'
         return mode === 'login'
             ? 'ログインに失敗しました。入力情報を確認して再試行してください。'
             : '新規登録に失敗しました。入力情報を確認して再試行してください。'
