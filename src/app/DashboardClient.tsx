@@ -303,10 +303,11 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
 
     const isUnassignedAssignee = (assigneeId?: string | null, assigneeName?: string | null) => {
         const normalized = normalizeAssigneeName(assigneeName)
+        if (normalized === '') return true
         if (normalized === '未定' || normalized === '担当未定' || normalized === 'unknown' || normalized === 'unassigned' || normalized === 'none' || normalized === '?') {
             return true
         }
-        return !assigneeId && normalized === ''
+        return false
     }
 
     // 担当者のアバターを取得する共通ヘルパー
