@@ -315,6 +315,11 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
         return getFallbackAvatar(name || 'unknown');
     }
 
+    const isUnassignedTask = (task: any) => {
+        const name = (task.assignee_name || '').trim()
+        return !task.assignee_id && (!name || name === '未定' || name === '担当未定' || name === 'unknown')
+    }
+
     const cleanCommentContent = (content: string, imageUrl?: string | null) => {
         if (!content) return ''
         let cleaned = content
@@ -549,7 +554,13 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                 {isManager ? (
                                     <div className="flex flex-col items-center w-full gap-2">
                                         <div className="flex -space-x-1">
-                                            <img src={getAssigneeAvatar(task.assignee_id, task.assignee_name)} className="w-8 h-8 pixelated-avatar border border-black shadow-sm object-cover" />
+                                            {isUnassignedTask(task) ? (
+                                                <div className="w-8 h-8 flex items-center justify-center border border-gray-500 bg-[#1b1b1b] text-gray-300 text-lg font-bold leading-none">
+                                                    ?
+                                                </div>
+                                            ) : (
+                                                <img src={getAssigneeAvatar(task.assignee_id, task.assignee_name)} className="w-8 h-8 pixelated-avatar border border-black shadow-sm object-cover" />
+                                            )}
                                         </div>
                                         <select
                                             value={task.assignee_name || ''}
@@ -565,10 +576,16 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                 ) : (
                                     <div className="group/assignee flex flex-col items-center w-full">
                                         <div className="flex -space-x-1 mb-1">
-                                            <img src={getAssigneeAvatar(task.assignee_id, task.assignee_name)} className="w-8 h-8 pixelated-avatar border border-black object-cover" />
+                                            {isUnassignedTask(task) ? (
+                                                <div className="w-8 h-8 flex items-center justify-center border border-gray-500 bg-[#1b1b1b] text-gray-300 text-lg font-bold leading-none">
+                                                    ?
+                                                </div>
+                                            ) : (
+                                                <img src={getAssigneeAvatar(task.assignee_id, task.assignee_name)} className="w-8 h-8 pixelated-avatar border border-black object-cover" />
+                                            )}
                                         </div>
                                         <span className="text-[10px] text-center text-gray-400 truncate w-full">
-                                            {task.assignee_id ? (userProfiles[task.assignee_id]?.display_name || task.assignee_name || '担当未定') : (task.assignee_name || '担当未定')}
+                                            {isUnassignedTask(task) ? '未アサイン' : (task.assignee_id ? (userProfiles[task.assignee_id]?.display_name || task.assignee_name || '担当未定') : (task.assignee_name || '担当未定'))}
                                         </span>
                                     </div>
                                 )}
@@ -1311,23 +1328,33 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                         {bottleneckTasks.map((task: any) => {
                             const avatar = getAssigneeAvatar(task.assignee_id, task.assignee_name);
+                            const isUnassigned = isUnassignedTask(task);
                             return (
                                 <div 
                                     key={task.id} 
                                     onClick={() => scrollToTask(task.id, task.project_id)}
                                     className="border-2 border-[var(--danger-color)] p-3 flex items-center gap-4 bg-[rgba(255,51,51,0.1)] cursor-pointer hover:translate-x-1 hover:bg-[rgba(255,51,51,0.2)] transition-all group/emergency"
                                 >
-                                    <img 
-                                        src={avatar} 
-                                        alt="担当者" 
-                                        className="w-12 h-12 pixelated-avatar border border-[var(--danger-color)] object-cover shadow-[0_0_10px_rgba(255,51,51,0.3)]" 
-                                    />
+                                    {isUnassigned ? (
+                                        <div className="w-12 h-12 flex flex-col items-center justify-center border border-yellow-600 bg-[#2a2006] text-yellow-300 shadow-[0_0_10px_rgba(234,179,8,0.2)]">
+                                            <span className="text-xl leading-none font-bold">?</span>
+                                        </div>
+                                    ) : (
+                                        <img 
+                                            src={avatar} 
+                                            alt="担当者" 
+                                            className="w-12 h-12 pixelated-avatar border border-[var(--danger-color)] object-cover shadow-[0_0_10px_rgba(255,51,51,0.3)]" 
+                                        />
+                                    )}
                                     <div className="flex-grow">
                                         <div className="text-xl mb-1 group-hover/emergency:text-white transition-colors">{task.title}</div>
                                         <div className="text-[var(--danger-color)] text-[10px] uppercase font-bold flex justify-between items-center">
                                             <span>▶︎ BOSS ENCOUNTER</span>
                                             <span className="animate-pulse">WATCH OUT!</span>
                                         </div>
+                                        {isUnassigned && (
+                                            <div className="text-[10px] mt-1 text-yellow-300 font-bold">担当者: 未アサイン</div>
+                                        )}
                                     </div>
                                 </div>
                             );
@@ -1687,11 +1714,16 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                                         const profile = task.assignee_id ? userProfiles[task.assignee_id] : null;
                                                         const avatar = profile?.avatar_url || getFallbackAvatar(task.assignee_name || 'unknown');
                                                         const name = profile?.display_name || task.assignee_name || '担当未定';
+                                                        const isUnassigned = isUnassignedTask(task);
                                                         return (
                                                             <>
-                                                                <img src={avatar} alt={name} className="w-6 h-6 pixelated-avatar grayscale border border-gray-800 object-cover" title={name} />
+                                                                {isUnassigned ? (
+                                                                    <div className="w-6 h-6 flex items-center justify-center border border-gray-600 bg-[#1a1a1a] text-gray-300 text-sm font-bold leading-none">?</div>
+                                                                ) : (
+                                                                    <img src={avatar} alt={name} className="w-6 h-6 pixelated-avatar grayscale border border-gray-800 object-cover" title={name} />
+                                                                )}
                                                                 <span className="text-[9px] text-gray-700 truncate w-full text-center">
-                                                                    {name}
+                                                                    {isUnassigned ? '未アサイン' : name}
                                                                 </span>
                                                             </>
                                                         );
