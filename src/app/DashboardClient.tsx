@@ -144,7 +144,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
         }
 
         // プロジェクト情報と自分のロールを取得
-        const { data: projData } = await supabase.from('projects').select('*').eq('id', activeTab).single()
+        const { data: projData } = await supabase.from('projects').select('*').eq('id', activeTab).maybeSingle()
         if (projData) {
             setActiveProject(projData)
             setProjectInviteCode(projData.invite_code)
@@ -205,6 +205,12 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
         let priorityClasses = "border-b-2 border-dotted border-[#333]";
         if (isBoss) priorityClasses = "border-4 border-solid !border-[#ff3333] shadow-[0_0_40px_rgba(255,51,51,0.7)] my-8 scale-[1.02] z-10 relative bg-[#050505]";
         else if (isElite) priorityClasses = "border-4 border-solid !border-[#ffaa00] shadow-[0_0_30px_rgba(255,170,0,0.5)] my-8 scale-[1.01] z-10 relative bg-[#050505]";
+
+        const getYouTubeEmbedUrl = (content: string) => {
+            const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+            const match = content.match(regExp);
+            return (match && match[2].length === 11) ? `https://www.youtube.com/embed/${match[2]}` : null;
+        }
 
         return (
             <Draggable key={task.id} draggableId={task.id} index={index}>
@@ -346,7 +352,40 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                                                 {new Date(comment.created_at).toLocaleString('ja-JP')}
                                                             </span>
                                                         </div>
-                                                        <p className="text-sm leading-relaxed text-gray-200 whitespace-pre-wrap">{comment.content}</p>
+                                                        <p className="text-sm leading-relaxed text-gray-200 whitespace-pre-wrap mb-2">{comment.content}</p>
+                                                        
+                                                        {/* 🖼️ 画像表示 */}
+                                                        {comment.image_url && (
+                                                            <div className="mt-2 mb-3 border-2 border-[#333] inline-block">
+                                                                <img 
+                                                                    src={comment.image_url} 
+                                                                    alt="添付画像" 
+                                                                    className="max-w-full max-h-[300px] object-contain cursor-zoom-in" 
+                                                                    onClick={() => window.open(comment.image_url, '_blank')}
+                                                                />
+                                                            </div>
+                                                        )}
+
+                                                        {/* 📺 YouTube埋め込み */}
+                                                        {(() => {
+                                                            const embedUrl = getYouTubeEmbedUrl(comment.content);
+                                                            if (embedUrl) {
+                                                                return (
+                                                                    <div className="aspect-video mt-2 border-2 border-[#333]">
+                                                                        <iframe 
+                                                                            width="100%" 
+                                                                            height="100%" 
+                                                                            src={embedUrl} 
+                                                                            title="YouTube video player" 
+                                                                            frameBorder="0" 
+                                                                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" 
+                                                                            allowFullScreen
+                                                                        ></iframe>
+                                                                    </div>
+                                                                );
+                                                            }
+                                                            return null;
+                                                        })()}
                                                     </div>
                                                 </div>
                                             )
@@ -355,6 +394,29 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                 </div>
 
                                 <form onSubmit={(e) => submitComment(e, task.id)} className="flex flex-col gap-2 mt-2 px-2">
+                                    <div className="flex items-center gap-2 mb-1">
+                                        <label className="cursor-pointer flex items-center gap-1 text-[10px] text-gray-400 hover:text-[var(--active-color)] bg-[#1a1a1a] px-2 py-1 rounded border border-[#333]">
+                                            <span>📷 写真を添付</span>
+                                            <input 
+                                                type="file" 
+                                                accept="image/*" 
+                                                className="hidden" 
+                                                onChange={async (e) => {
+                                                    if (!e.target.files?.[0]) return;
+                                                    const file = e.target.files[0];
+                                                    const path = `comments/${task.id}/${Date.now()}-${file.name}`;
+                                                    const { data, error } = await supabase.storage.from('avatars').upload(path, file);
+                                                    if (data) {
+                                                        const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(path);
+                                                        // 即座にコメントとして投稿するか、URLをフォームに入れるか
+                                                        // ここではURLを自動的にコメント末尾に足してプレビュー風にするか、stateで持つ
+                                                        setNewComment(prev => `${prev}\n${publicUrl}`);
+                                                    }
+                                                }}
+                                            />
+                                        </label>
+                                        <span className="text-[9px] text-gray-600 italic">※YouTubeのURLを貼ると自動で動画が表示されます</span>
+                                    </div>
                                     <textarea
                                         value={newComment}
                                         onChange={(e) => setNewComment(e.target.value)}
@@ -797,7 +859,9 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                             <span className="text-2xl animate-bounce">📜</span>
                                             <div>
                                                 <div className="text-[10px] text-yellow-500/70 uppercase tracking-[0.2em] font-bold mb-1">Secret Invite Spell (招待の呪文)</div>
-                                                <div className="text-xl text-yellow-400 font-mono font-bold select-all tracking-wider shadow-yellow-500/20 drop-shadow-sm">{projectInviteCode || 'LOADING...'}</div>
+                                                <div className="text-xl text-yellow-400 font-mono font-bold select-all tracking-wider shadow-yellow-500/20 drop-shadow-sm">
+                                                    {activeProject?.invite_code || projectInviteCode || 'LOADING...'}
+                                                </div>
                                             </div>
                                         </div>
                                         <div className="text-[10px] text-yellow-600/80 italic glass-panel p-2 border border-yellow-600/20 bg-black/40">
