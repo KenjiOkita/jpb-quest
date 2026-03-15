@@ -539,6 +539,16 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
         const dueDate = task.due_date ? new Date(task.due_date) : null;
         const isOverdue = dueDate && dueDate < now && task.status !== 'completed';
         const isNearDeadline = dueDate && !isOverdue && (dueDate.getTime() - now.getTime()) < 24 * 60 * 60 * 1000 && task.status !== 'completed';
+        const dueDateBadgeClass = isOverdue
+            ? 'border-red-400 text-red-200 bg-red-950/70 shadow-[0_0_10px_rgba(239,68,68,0.45)] animate-pulse'
+            : isNearDeadline
+                ? 'border-orange-400 text-orange-100 bg-orange-950/65 shadow-[0_0_10px_rgba(251,146,60,0.38)]'
+                : 'border-sky-400 text-sky-100 bg-[#071423] shadow-[0_0_8px_rgba(56,189,248,0.28)]'
+        const prioritySelectToneClass = isBoss
+            ? 'bg-[#2b0808] border-red-500 text-red-200 shadow-[0_0_10px_rgba(239,68,68,0.35)]'
+            : isElite
+                ? 'bg-[#2b1a05] border-amber-500 text-amber-200 shadow-[0_0_8px_rgba(245,158,11,0.3)]'
+                : 'bg-[#111] border-gray-600 text-gray-200'
 
         // Priority specific styling
         let priorityClasses = "border-b-2 border-dotted border-[#333]";
@@ -668,8 +678,8 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                 )}
                                 <div className="flex gap-1.5 md:gap-2 items-center flex-wrap">
                                     {dueDate && (
-                                        <div className={`text-[9px] md:text-[9px] px-1.5 md:px-1.5 py-0.5 border font-bold flex items-center gap-1
-                                            ${isOverdue ? 'border-red-500 text-red-500 animate-bounce' : isNearDeadline ? 'border-orange-500 text-orange-500' : 'border-gray-600 text-gray-500'}`}>
+                                        <div className={`text-[10px] md:text-xs px-2 md:px-2.5 py-1 md:py-1 border font-bold flex items-center gap-1 rounded-sm
+                                            ${dueDateBadgeClass}`}>
                                             {isOverdue ? '💀 逃走中 (OVERDUE)' : isNearDeadline ? '⏳ 逃走間近 (NEAR)' : '📅 期限'}
                                             : {dueDate.toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                                         </div>
@@ -684,7 +694,8 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                     <select
                                         value={task.priority || 'normal'}
                                         onChange={(e) => updateTaskPriority(task, e.target.value)}
-                                        className="bg-transparent border border-[#444] text-[9px] md:text-[9px] text-gray-500 outline-none hover:border-gray-400 cursor-pointer"
+                                        className={`border text-[10px] md:text-[11px] px-1.5 py-1 rounded-sm outline-none cursor-pointer transition-colors
+                                            ${prioritySelectToneClass}`}
                                     >
                                         <option value="normal">雑魚敵</option>
                                         <option value="elite">中ボス</option>
@@ -1784,7 +1795,12 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                         <select
                                             value={newTaskPriority}
                                             onChange={e => setNewTaskPriority(e.target.value)}
-                                            className="bg-black border-4 border-white p-4 text-white outline-none text-lg focus:bg-[#111] w-full cursor-pointer"
+                                            className={`border-4 p-4 outline-none text-lg w-full cursor-pointer transition-colors
+                                                ${newTaskPriority === 'boss'
+                                                    ? 'bg-red-950/40 border-red-500 text-red-100 shadow-[0_0_14px_rgba(239,68,68,0.3)]'
+                                                    : newTaskPriority === 'elite'
+                                                        ? 'bg-amber-950/35 border-amber-500 text-amber-100 shadow-[0_0_10px_rgba(245,158,11,0.25)]'
+                                                        : 'bg-black border-white text-white focus:bg-[#111]'}`}
                                         >
                                             <option value="normal">⚔️ 雑魚敵 — 通常タスク</option>
                                             <option value="elite">🟠 中ボス — 重要タスク</option>
