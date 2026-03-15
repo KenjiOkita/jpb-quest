@@ -298,6 +298,25 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
         return () => document.removeEventListener('mousedown', handleOutsideClick)
     }, [isDueDatePickerOpen])
 
+    useEffect(() => {
+        if (!editingTaskId) return
+
+        const handleOutsideEditClick = (event: PointerEvent) => {
+            const target = event.target as HTMLElement | null
+            if (!target) return
+            if (target.closest('[data-task-edit-panel]') || target.closest('[data-task-edit-trigger]')) return
+
+            // 外側を押したら「戻す」と同じ挙動で編集前の状態に戻す
+            setEditingTaskId(null)
+            setEditTaskTitle('')
+            setEditTaskDueDate('')
+            setIsDueDatePickerOpen(false)
+        }
+
+        document.addEventListener('pointerdown', handleOutsideEditClick)
+        return () => document.removeEventListener('pointerdown', handleOutsideEditClick)
+    }, [editingTaskId])
+
     const isOwner = userRole === 'owner'
     const isManager = userRole === 'owner' || userRole === 'admin' // adminを軍師として扱う
 
@@ -552,7 +571,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
 
                             <div className="grow text-sm md:text-base flex items-center flex-wrap gap-1.5 md:gap-2.5 min-w-0">
                                 {isEditingTaskTitle ? (
-                                    <div className="relative flex items-center flex-wrap gap-1.5 md:gap-2 mr-1 md:mr-1.5 min-w-[200px] md:min-w-[240px] flex-1">
+                                    <div data-task-edit-panel="true" className="relative flex items-center flex-wrap gap-1.5 md:gap-2 mr-1 md:mr-1.5 min-w-[200px] md:min-w-[240px] flex-1">
                                         <input
                                             type="text"
                                             value={editTaskTitle}
@@ -670,6 +689,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                     {!isEditingTaskTitle && (
                                         <button
                                             type="button"
+                                            data-task-edit-trigger="true"
                                             onClick={() => beginTaskTitleEdit(task)}
                                             className="inline-flex items-center gap-1 rounded-sm px-1.5 md:px-2 py-1 text-[9px] md:text-[10px] font-bold border border-[#9d7b3b] bg-[#231b0c] text-[#f2d78f] hover:bg-[#2e2411] transition-colors whitespace-nowrap"
                                             title="タスク名・期限を編集"
@@ -1998,6 +2018,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                                      <div className="grow text-sm md:text-lg text-gray-200 line-through flex items-center flex-wrap gap-1.5 md:gap-2 min-w-0">
                                                         {isEditingTaskTitle ? (
                                                             <div
+                                                                data-task-edit-panel="true"
                                                                 className="relative flex items-center flex-wrap gap-2 min-w-[280px] flex-1"
                                                                 style={{ textDecoration: 'none' }}
                                                             >
@@ -2087,6 +2108,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                                                 </span>
                                                                 <button
                                                                     type="button"
+                                                                    data-task-edit-trigger="true"
                                                                     onClick={() => beginTaskTitleEdit(task)}
                                                                     className="inline-flex items-center gap-1 rounded-sm px-2 py-1 text-[10px] font-bold border border-[#9d7b3b] bg-[#231b0c] text-[#f2d78f] hover:bg-[#2e2411] transition-colors no-underline"
                                                                     style={{ textDecoration: 'none' }}
