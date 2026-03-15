@@ -63,6 +63,12 @@ function LoginContent() {
                             name="email"
                             type="email"
                             required
+                            autoComplete="email"
+                            autoCapitalize="none"
+                            autoCorrect="off"
+                            spellCheck={false}
+                            inputMode="email"
+                            enterKeyHint="next"
                             placeholder="hero@example.com"
                             className="bg-black border-2 border-white p-3 text-white outline-none focus:border-blue-400 transition-colors font-inherit text-lg"
                         />
@@ -75,6 +81,11 @@ function LoginContent() {
                             name="password"
                             type="password"
                             required
+                            autoComplete="current-password"
+                            autoCapitalize="none"
+                            autoCorrect="off"
+                            spellCheck={false}
+                            enterKeyHint="done"
                             placeholder="********"
                             className="bg-black border-2 border-white p-3 text-white outline-none focus:border-blue-400 transition-colors font-inherit text-lg"
                         />
