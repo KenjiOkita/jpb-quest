@@ -10,6 +10,9 @@ export const metadata: Metadata = {
     statusBarStyle: 'black-translucent',
     title: 'JPBクエスト',
   },
+  icons: {
+    apple: '/icon-512.png',
+  },
 }
 
 export const viewport = {
