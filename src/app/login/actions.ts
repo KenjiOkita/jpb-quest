@@ -47,6 +47,8 @@ export async function signup(formData: FormData) {
         redirect(`/error?message=${encodeURIComponent(error.message)}`)
     }
 
+    // After signup, redirect to login with success message 
+    // to avoid confusion if email confirmation is on or slow
     revalidatePath('/', 'layout')
-    redirect('/')
+    redirect('/login?success=true')
 }

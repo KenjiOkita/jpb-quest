@@ -1,7 +1,9 @@
 'use client'
 
 import { useFormStatus } from 'react-dom'
+import { useSearchParams } from 'next/navigation'
 import { login, signup } from './actions'
+import { Suspense } from 'react'
 
 function SubmitButton({ label, loadingLabel, isPrimary = true }: { label: string, loadingLabel: string, isPrimary?: boolean }) {
     const { pending } = useFormStatus()
@@ -31,7 +33,10 @@ function SubmitButton({ label, loadingLabel, isPrimary = true }: { label: string
     )
 }
 
-export default function LoginPage() {
+function LoginContent() {
+    const searchParams = useSearchParams()
+    const isSuccess = searchParams.get('success') === 'true'
+
     return (
         <div className="min-h-screen flex items-center justify-center relative pointer-events-auto overflow-hidden">
             {/* 背景の遮断レイヤー（背景画像を見せつつ文字を読みやすくする） */}
@@ -40,6 +45,14 @@ export default function LoginPage() {
             {/* フォームコンテナ */}
             <div className="retro-window max-w-md w-full relative z-10 bg-black p-8 shadow-[0_0_50px_rgba(0,0,0,0.8)] border-4 border-white mx-4 my-8">
                 <h1 className="retro-title text-center text-3xl mb-6">JPB クエスト</h1>
+                
+                {isSuccess && (
+                    <div className="bg-green-900 border-2 border-green-400 p-4 mb-6 text-green-100 text-sm animate-bounce text-center">
+                        ✨ 冒険者登録に成功しました！ ✨<br />
+                        そのままログインして冒険を開始してください。
+                    </div>
+                )}
+
                 <p className="text-center mb-6 text-gray-300 font-bold">ギルドへのログイン（冒険者認証）</p>
 
                 <form className="flex flex-col gap-4 relative z-20">
@@ -85,5 +98,13 @@ export default function LoginPage() {
                 </form>
             </div>
         </div>
+    )
+}
+
+export default function LoginPage() {
+    return (
+        <Suspense fallback={<div className="min-h-screen flex items-center justify-center bg-black text-white font-bold">鑑定中...</div>}>
+            <LoginContent />
+        </Suspense>
     )
 }
