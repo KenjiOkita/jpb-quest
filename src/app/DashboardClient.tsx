@@ -134,6 +134,40 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
         }
     }
 
+    // 🖼️ 画像をブラウザ側で圧縮するヘルパー
+    const compressImage = (file: File): Promise<Blob | File> => {
+        return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+            reader.onload = (event) => {
+                const img = new Image();
+                img.src = event.target?.result as string;
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    let width = img.width;
+                    let height = img.height;
+
+                    // 最大横幅を 1200px に制限（十分な高画質を保ちつつ容量削減）
+                    const MAX_WIDTH = 1200;
+                    if (width > MAX_WIDTH) {
+                        height = Math.round((height * MAX_WIDTH) / width);
+                        width = MAX_WIDTH;
+                    }
+
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx?.drawImage(img, 0, 0, width, height);
+
+                    // JPEG形式、画質0.7で書き出し（劇的に軽くなります）
+                    canvas.toBlob((blob) => {
+                        resolve(blob || file);
+                    }, 'image/jpeg', 0.7);
+                };
+            };
+        });
+    }
+
     // 現在のプロジェクトでの自分の権限を確認する
     const fetchMyRole = async () => {
         if (activeTab === 'all') {
@@ -143,7 +177,6 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
             return
         }
 
-        // プロジェクト情報と自分のロールを取得
         const { data: projData } = await supabase.from('projects').select('*').eq('id', activeTab).maybeSingle()
         if (projData) {
             setActiveProject(projData)
@@ -207,9 +240,9 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
         else if (isElite) priorityClasses = "border-4 border-solid !border-[#ffaa00] shadow-[0_0_30px_rgba(255,170,0,0.5)] my-8 scale-[1.01] z-10 relative bg-[#050505]";
 
         const getYouTubeEmbedUrl = (content: string) => {
-            const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+            const regExp = /(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:[^\/\n\s]+\/\S+\/|(?:v|e(?:mbed)?)\/|\S*?[?&]v=)|youtu\.be\/)([a-zA-Z0-9_-]{11})/;
             const match = content.match(regExp);
-            return (match && match[2].length === 11) ? `https://www.youtube.com/embed/${match[2]}` : null;
+            return match ? `https://www.youtube.com/embed/${match[1]}` : null;
         }
 
         return (
@@ -403,14 +436,36 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                                 className="hidden" 
                                                 onChange={async (e) => {
                                                     if (!e.target.files?.[0]) return;
-                                                    const file = e.target.files[0];
-                                                    const path = `comments/${task.id}/${Date.now()}-${file.name}`;
-                                                    const { data, error } = await supabase.storage.from('avatars').upload(path, file);
-                                                    if (data) {
-                                                        const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(path);
-                                                        // 即座にコメントとして投稿するか、URLをフォームに入れるか
-                                                        // ここではURLを自動的にコメント末尾に足してプレビュー風にするか、stateで持つ
-                                                        setNewComment(prev => `${prev}\n${publicUrl}`);
+                                                    const originalFile = e.target.files[0];
+                                                    
+                                                    setUploading(true);
+                                                    
+                                                    // 1. 画像を圧縮
+                                                    const compressedBlob = await compressImage(originalFile);
+                                                    
+                                                    // TODO: Replace with actual Xserver upload API URL
+                                                    const UPLOAD_API_URL = 'https://jp-branding.com/jpb-quest/upload.php'; 
+                                                    
+                                                    const formData = new FormData();
+                                                    // 圧縮後のBlobを送信（ファイル名は継承）
+                                                    formData.append('image', compressedBlob, originalFile.name);
+
+                                                    try {
+                                                        const response = await fetch(UPLOAD_API_URL, {
+                                                            method: 'POST',
+                                                            body: formData
+                                                        });
+                                                        const result = await response.json();
+                                                        
+                                                        if (result.url) {
+                                                            setNewComment(prev => `${prev}\n${result.url}`);
+                                                        } else {
+                                                            alert('アップロード失敗: ' + (result.error || '不明なエラー'));
+                                                        }
+                                                    } catch (err) {
+                                                        alert('通信エラー: エックスサーバーへのアップロードに失敗しました。');
+                                                    } finally {
+                                                        setUploading(false);
                                                     }
                                                 }}
                                             />
@@ -701,7 +756,8 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                 task_id: taskId,
                 user_id: user.id,
                 user_email: user.email,
-                content: newComment
+                content: newComment,
+                image_url: newComment.match(/https?:\/\/[^\s]+(?:\.jpg|\.jpeg|\.png|\.gif)/i)?.[0] || null
             })
             .select()
 
