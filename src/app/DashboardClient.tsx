@@ -1573,7 +1573,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
     }
 
     return (
-        <main className="py-12 min-h-screen relative max-w-4xl mx-auto px-4">
+        <main className="py-6 md:py-12 min-h-screen relative max-w-none md:max-w-4xl mx-0 md:mx-auto px-0 md:px-4 overflow-x-clip">
             {zoomImageUrl && (
                 <div
                     className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
@@ -1608,7 +1608,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                     </div>
                 </div>
             )}
-            <div className="flex justify-between items-center mb-10 border-b-4 border-double border-white pb-6 bg-black p-6 shadow-[0_0_0_4px_#000,0_0_0_8px_#fff] mx-4 relative overflow-hidden">
+            <div className="flex justify-between items-center mb-6 md:mb-10 border-b-4 border-double border-white pb-4 md:pb-6 bg-black p-3 md:p-6 shadow-[0_0_0_2px_#000,0_0_0_4px_#fff] md:shadow-[0_0_0_4px_#000,0_0_0_8px_#fff] mx-0 md:mx-4 relative overflow-hidden">
                 <div className="flex items-center gap-6">
                     <div className="relative group">
                         <img

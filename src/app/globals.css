@@ -18,6 +18,11 @@
     --hover-bg: #222222;
   }
 
+  html,
+  body {
+    overflow-x: hidden;
+  }
+
   body {
     background-color: #55ee33;
     background-image: url('/assets/dq_bright_field.png');
@@ -117,6 +122,23 @@
       1px 1px 0 currentColor,
       2px 2px 0 rgba(0, 0, 0, 0.9),
       4px 4px 0 rgba(0, 0, 0, 0.65);
+  }
+}
+
+@media (max-width: 768px) {
+  @layer base {
+    main {
+      padding: 16px 0;
+      box-shadow: none;
+    }
+  }
+
+  @layer components {
+    .retro-window {
+      margin: 8px 0;
+      padding: 16px;
+      box-shadow: 0 0 0 2px #000, 0 0 0 4px #fff;
+    }
   }
 }
 
