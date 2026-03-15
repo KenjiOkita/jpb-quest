@@ -22,6 +22,8 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
     const [zoomImageUrl, setZoomImageUrl] = useState<string | null>(null)
     const [editingCommentId, setEditingCommentId] = useState<string | null>(null)
     const [editCommentText, setEditCommentText] = useState('')
+    const [editingTaskId, setEditingTaskId] = useState<string | null>(null)
+    const [editTaskTitle, setEditTaskTitle] = useState('')
     const [newTaskPriority, setNewTaskPriority] = useState('normal') // normal, elite, boss
     const [userRole, setUserRole] = useState<string | null>(null) // 'owner', 'admin', 'member'
     const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
@@ -297,11 +299,44 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
         return comment.user_id === user.id
     }
 
+    const beginTaskTitleEdit = (task: any) => {
+        setEditingTaskId(task.id)
+        setEditTaskTitle(task.title || '')
+    }
+
+    const cancelTaskTitleEdit = () => {
+        setEditingTaskId(null)
+        setEditTaskTitle('')
+    }
+
+    const saveTaskTitle = async (taskId: string) => {
+        const trimmedTitle = editTaskTitle.trim()
+        if (!trimmedTitle) {
+            alert('タスク名は空にできません。')
+            return
+        }
+
+        const { error } = await supabase
+            .from('tasks')
+            .update({ title: trimmedTitle })
+            .eq('id', taskId)
+
+        if (error) {
+            alert('タスク名の更新エラー: ' + error.message)
+            return
+        }
+
+        setTasks((prev) => prev.map((task: any) => (
+            task.id === taskId ? { ...task, title: trimmedTitle } : task
+        )))
+        cancelTaskTitleEdit()
+    }
+
     const renderTaskItem = (task: any, index: number) => {
         const isProgress = task.status === 'progress';
-        const assignees = (task.assignee_name || '担当未定').split(/[,、\s]+/).filter(Boolean).slice(0, 5);
         const isBoss = task.priority === 'boss';
         const isElite = task.priority === 'elite';
+        const isEditingTaskTitle = editingTaskId === task.id;
 
         // Priority specific styling
         let priorityClasses = "border-b-2 border-dotted border-[#333]";
@@ -334,14 +369,60 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                             </div>
 
                             <div className="grow text-lg flex items-center flex-wrap gap-4">
-                                <span
-                                    className={`mr-2 cursor-pointer hover:underline decoration-[var(--active-color)] underline-offset-4 
-                                        ${isBoss ? 'text-[#ff4444] font-bold text-2xl tracking-tighter' : isElite ? 'text-[#ffaa00] font-bold text-xl' : ''}`}
-                                    onClick={() => toggleTaskExpansion(task.id)}
-                                    title="クリックで作戦会議（コメント）を開く"
-                                >
-                                    {task.title}
-                                </span>
+                                {isEditingTaskTitle ? (
+                                    <div className="flex items-center gap-2 mr-2 min-w-[280px] flex-1">
+                                        <input
+                                            type="text"
+                                            value={editTaskTitle}
+                                            onChange={(e) => setEditTaskTitle(e.target.value)}
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter') {
+                                                    e.preventDefault()
+                                                    saveTaskTitle(task.id)
+                                                }
+                                                if (e.key === 'Escape') {
+                                                    cancelTaskTitleEdit()
+                                                }
+                                            }}
+                                            autoFocus
+                                            className="min-w-0 flex-1 bg-[#1a1200] border-2 border-[var(--active-color)] px-3 py-2 text-white outline-none shadow-[0_0_0_1px_rgba(255,204,0,0.2)]"
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={() => saveTaskTitle(task.id)}
+                                            className="shrink-0 px-3 py-2 text-xs font-bold bg-[var(--active-color)] text-black border border-yellow-200 hover:brightness-110"
+                                        >
+                                            保存
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={cancelTaskTitleEdit}
+                                            className="shrink-0 px-3 py-2 text-xs font-bold border border-gray-600 text-gray-300 hover:border-gray-400 hover:text-white"
+                                        >
+                                            戻す
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <div className="flex items-center gap-2 mr-2 min-w-0">
+                                        <span
+                                            className={`cursor-pointer hover:underline decoration-[var(--active-color)] underline-offset-4 
+                                                ${isBoss ? 'text-[#ff4444] font-bold text-2xl tracking-tighter' : isElite ? 'text-[#ffaa00] font-bold text-xl' : ''}`}
+                                            onClick={() => toggleTaskExpansion(task.id)}
+                                            title="クリックで作戦会議（コメント）を開く"
+                                        >
+                                            {task.title}
+                                        </span>
+                                        <button
+                                            type="button"
+                                            onClick={() => beginTaskTitleEdit(task)}
+                                            className="inline-flex items-center gap-1 rounded-sm px-2.5 py-1 text-[11px] font-bold border border-sky-300 bg-sky-400 text-black shadow-[0_0_12px_rgba(56,189,248,0.35)] hover:bg-sky-300 transition-colors"
+                                            title="タスク名を編集"
+                                        >
+                                            <span>✎</span>
+                                            <span>タイトル編集</span>
+                                        </button>
+                                    </div>
+                                )}
                                 <div className="flex gap-2 items-center">
                                     <div className="cursor-pointer select-none" onClick={() => toggleProgress(task)} title="クリックで進行状態を変更">
                                         {isProgress ? (
@@ -451,7 +532,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                                             <span className="text-[10px] text-[var(--active-color)] uppercase tracking-widest font-bold">
                                                                 {profile.display_name}
                                                             </span>
-                                                            <div className="flex items-center gap-2">
+                                                            <div className="flex items-center gap-2 flex-wrap justify-end">
                                                                 <span className="text-[8px] text-gray-500">
                                                                     {new Date(comment.created_at).toLocaleString('ja-JP')}
                                                                 </span>
@@ -462,18 +543,22 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                                                             setEditingCommentId(comment.id)
                                                                             setEditCommentText(cleanCommentContent(comment.content, comment.image_url))
                                                                         }}
-                                                                        className="text-[10px] text-gray-400 hover:text-yellow-300"
+                                                                        className="inline-flex items-center gap-1 rounded-sm px-2.5 py-1 text-[10px] font-bold border border-yellow-300 bg-yellow-400 text-black shadow-[0_0_12px_rgba(250,204,21,0.35)] hover:bg-yellow-300 transition-colors"
+                                                                        title="このコメントを編集"
                                                                     >
-                                                                        編集
+                                                                        <span>✎</span>
+                                                                        <span>編集する</span>
                                                                     </button>
                                                                 )}
                                                                 {canDeleteComment(comment) && (
                                                                     <button
                                                                         type="button"
                                                                         onClick={() => deleteComment(comment.id)}
-                                                                        className="text-[10px] text-gray-500 hover:text-red-400"
+                                                                        className="inline-flex items-center gap-1 rounded-sm px-2.5 py-1 text-[10px] font-bold border border-red-300 bg-red-500 text-white shadow-[0_0_12px_rgba(239,68,68,0.35)] hover:bg-red-400 transition-colors"
+                                                                        title="このコメントを削除"
                                                                     >
-                                                                        削除
+                                                                        <span>×</span>
+                                                                        <span>削除する</span>
                                                                     </button>
                                                                 )}
                                                             </div>
@@ -1418,7 +1503,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                             <div className="text-[10px] text-gray-600 mb-4">完了した日時と完了者を記録しています（クリックで作戦会議も表示）。</div>
                             <ul className="list-none p-0 m-0 opacity-50">
                                 {completedTasks.map((task: any) => {
-                                    const assignees = (task.assignee_name || '担当未定').split(/[,、\s]+/).filter(Boolean).slice(0, 5);
+                                    const isEditingTaskTitle = editingTaskId === task.id;
                                     return (
                                         <li key={task.id} className="border-b border-gray-800 transition-colors hover:bg-[var(--hover-bg)]">
                                             <div className="flex items-center p-3 gap-4">
@@ -1427,12 +1512,61 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                                     <span className="absolute top-[-4px] left-[2px] text-xl text-gray-400 pointer-events-none">✔</span>
                                                 </div>
                                                  <div className="grow text-lg text-gray-500 line-through flex items-center flex-wrap gap-2">
-                                                    <span
-                                                        className="cursor-pointer hover:underline decoration-gray-500 underline-offset-4"
-                                                        onClick={() => toggleTaskExpansion(task.id)}
-                                                    >
-                                                        {task.title}
-                                                    </span>
+                                                    {isEditingTaskTitle ? (
+                                                        <div
+                                                            className="flex items-center gap-2 min-w-[280px] flex-1"
+                                                            style={{ textDecoration: 'none' }}
+                                                        >
+                                                            <input
+                                                                type="text"
+                                                                value={editTaskTitle}
+                                                                onChange={(e) => setEditTaskTitle(e.target.value)}
+                                                                onKeyDown={(e) => {
+                                                                    if (e.key === 'Enter') {
+                                                                        e.preventDefault()
+                                                                        saveTaskTitle(task.id)
+                                                                    }
+                                                                    if (e.key === 'Escape') {
+                                                                        cancelTaskTitleEdit()
+                                                                    }
+                                                                }}
+                                                                autoFocus
+                                                                className="min-w-0 flex-1 bg-[#1a1200] border border-[var(--active-color)] px-3 py-2 text-white outline-none"
+                                                            />
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => saveTaskTitle(task.id)}
+                                                                className="shrink-0 px-3 py-2 text-xs font-bold bg-[var(--active-color)] text-black border border-yellow-200 hover:brightness-110"
+                                                            >
+                                                                保存
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={cancelTaskTitleEdit}
+                                                                className="shrink-0 px-3 py-2 text-xs font-bold border border-gray-600 text-gray-300 hover:border-gray-400 hover:text-white"
+                                                            >
+                                                                戻す
+                                                            </button>
+                                                        </div>
+                                                    ) : (
+                                                        <>
+                                                            <span
+                                                                className="cursor-pointer hover:underline decoration-gray-500 underline-offset-4"
+                                                                onClick={() => toggleTaskExpansion(task.id)}
+                                                            >
+                                                                {task.title}
+                                                            </span>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => beginTaskTitleEdit(task)}
+                                                                className="inline-flex items-center gap-1 rounded-sm px-2.5 py-1 text-[10px] font-bold border border-sky-300 bg-sky-400 text-black shadow-[0_0_12px_rgba(56,189,248,0.3)] hover:bg-sky-300 transition-colors no-underline"
+                                                                style={{ textDecoration: 'none' }}
+                                                            >
+                                                                <span>✎</span>
+                                                                <span>タイトル編集</span>
+                                                            </button>
+                                                        </>
+                                                    )}
                                                     {task.completed_at && (
                                                         <span className="text-xs text-gray-600 no-underline bg-gray-900 px-2 py-1 rounded">
                                                             完了: {new Date(task.completed_at).toLocaleString('ja-JP')}
