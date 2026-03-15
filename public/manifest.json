@@ -1,0 +1,16 @@
+{
+  "name": "JPBクエスト",
+  "short_name": "JPBQuest",
+  "description": "レトロRPG風タスク管理アプリ",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "icons": [
+    {
+      "src": "/favicon.ico",
+      "sizes": "64x64",
+      "type": "image/x-icon"
+    }
+  ]
+}

@@ -25,6 +25,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
     const [editingTaskId, setEditingTaskId] = useState<string | null>(null)
     const [editTaskTitle, setEditTaskTitle] = useState('')
     const [newTaskPriority, setNewTaskPriority] = useState('normal') // normal, elite, boss
+    const [newTaskDueDate, setNewTaskDueDate] = useState('')
     const [userRole, setUserRole] = useState<string | null>(null) // 'owner', 'admin', 'member'
     const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
     const [displayName, setDisplayName] = useState<string>('')
@@ -297,6 +298,23 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
         return found?.avatar_url || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(name)}`
     }
 
+    // 担当者のアバターを取得する共通ヘルパー
+    const getAssigneeAvatar = (assigneeId?: string | null, assigneeName?: string | null) => {
+        if (assigneeId && userProfiles[assigneeId]) {
+            return userProfiles[assigneeId].avatar_url;
+        }
+        
+        const name = assigneeName || '';
+        const isUnassigned = !assigneeId && (name === '未定' || name === '' || name === 'unknown' || name === '担当未定');
+        
+        if (isUnassigned) {
+            // 未定用のピクセルアート（目も口もないグレーのシルエット）
+            return "https://api.dicebear.com/7.x/pixel-art/svg?seed=none&backgroundColor=333333&eyes=none&mouth=none";
+        }
+        
+        return getFallbackAvatar(name || 'unknown');
+    }
+
     const cleanCommentContent = (content: string, imageUrl?: string | null) => {
         if (!content) return ''
         let cleaned = content
@@ -330,6 +348,26 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
         setNewCommentImageUrl(null)
     }
 
+    const scrollToTask = (taskId: string, projectId: string) => {
+        // プロジェクトタブを切り替え（全表示の場合はそのまま）
+        if (activeTab !== 'all' && activeTab !== projectId) {
+            setActiveTab(projectId)
+        }
+        
+        // DOMの更新を待ってからスクロール
+        setTimeout(() => {
+            const element = document.getElementById(`task-${taskId}`)
+            if (element) {
+                element.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                element.style.outline = '4px solid var(--active-color)'
+                element.style.outlineOffset = '2px'
+                setTimeout(() => {
+                    element.style.outline = 'none'
+                }, 2000)
+            }
+        }, 300)
+    }
+
     const saveTaskTitle = async (taskId: string) => {
         const trimmedTitle = editTaskTitle.trim()
         if (!trimmedTitle) {
@@ -359,6 +397,12 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
         const isElite = task.priority === 'elite';
         const isEditingTaskTitle = editingTaskId === task.id;
 
+        // 期限の状態判定
+        const now = new Date();
+        const dueDate = task.due_date ? new Date(task.due_date) : null;
+        const isOverdue = dueDate && dueDate < now && task.status !== 'completed';
+        const isNearDeadline = dueDate && !isOverdue && (dueDate.getTime() - now.getTime()) < 24 * 60 * 60 * 1000 && task.status !== 'completed';
+
         // Priority specific styling
         let priorityClasses = "border-b-2 border-dotted border-[#333]";
         if (isBoss) priorityClasses = "border-4 border-solid !border-[#ff3333] shadow-[0_0_40px_rgba(255,51,51,0.7)] my-8 scale-[1.02] z-10 relative bg-[#050505]";
@@ -374,12 +418,14 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
             <Draggable key={task.id} draggableId={task.id} index={index}>
                 {(provided) => (
                     <li
+                        id={`task-${task.id}`}
                         ref={provided.innerRef}
                         {...provided.draggableProps}
-                        className={`bg-black transition-all ${priorityClasses}`}
+                        className={`bg-black transition-all ${priorityClasses} ${isOverdue ? 'animate-pulse border-red-600 shadow-[0_0_20px_rgba(255,0,0,0.4)]' : ''}`}
                     >
                         <div className={`flex items-center p-5 gap-4 transition-colors hover:bg-[#111]
-                 ${isProgress ? 'border-l-8 border-l-[var(--progress-color)] bg-[rgba(255,68,68,0.05)] text-white' : 'text-[var(--muted-color)]'}`}>
+                 ${isProgress ? 'border-l-8 border-l-[var(--progress-color)] bg-[rgba(255,68,68,0.05)] text-white' : 'text-[var(--muted-color)]'}
+                 ${isOverdue ? 'bg-red-950/20' : isNearDeadline ? 'bg-orange-950/10' : ''}`}>
 
                             <div {...provided.dragHandleProps} className="text-yellow-400 hover:text-yellow-200 cursor-grab active:cursor-grabbing px-2 text-4xl select-none leading-none hover:scale-110 transition-all">
                                 ⠿
@@ -435,7 +481,14 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                         </span>
                                     </div>
                                 )}
-                                <div className="flex gap-2 items-center">
+                                <div className="flex gap-3 items-center">
+                                    {dueDate && (
+                                        <div className={`text-[10px] px-2 py-0.5 border font-bold flex items-center gap-1
+                                            ${isOverdue ? 'border-red-500 text-red-500 animate-bounce' : isNearDeadline ? 'border-orange-500 text-orange-500' : 'border-gray-600 text-gray-500'}`}>
+                                            {isOverdue ? '💀 逃走中 (OVERDUE)' : isNearDeadline ? '⏳ 逃走間近 (NEAR)' : '📅 期限'}
+                                            : {dueDate.toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                        </div>
+                                    )}
                                     <div className="cursor-pointer select-none" onClick={() => toggleProgress(task)} title="クリックで進行状態を変更">
                                         {isProgress ? (
                                             <span className="text-sm px-1.5 py-0.5 border border-[var(--progress-color)] text-[var(--progress-color)] rounded inline-flex items-center gap-1 hover:bg-[var(--progress-color)] hover:text-black transition-colors">⚔️ 冒険中</span>
@@ -491,16 +544,12 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                 )}
                             </div>
 
-                            <div className="flex flex-col items-center w-[80px] shrink-0 border-l border-white/10 ml-4 pl-4 pt-1">
+                                <div className="flex flex-col items-center w-[80px] shrink-0 border-l border-white/10 ml-4 pl-4 pt-1">
                                 <div className="text-[9px] text-gray-500 uppercase tracking-tighter mb-2">担当冒険者</div>
                                 {isManager ? (
                                     <div className="flex flex-col items-center w-full gap-2">
                                         <div className="flex -space-x-1">
-                                            {(() => {
-                                                const profile = task.assignee_id ? userProfiles[task.assignee_id] : null;
-                                                const avatar = profile?.avatar_url || getFallbackAvatar(task.assignee_name || 'unknown');
-                                                return <img src={avatar} className="w-8 h-8 pixelated-avatar border border-black shadow-sm object-cover" />;
-                                            })()}
+                                            <img src={getAssigneeAvatar(task.assignee_id, task.assignee_name)} className="w-8 h-8 pixelated-avatar border border-black shadow-sm object-cover" />
                                         </div>
                                         <select
                                             value={task.assignee_name || ''}
@@ -516,12 +565,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                 ) : (
                                     <div className="group/assignee flex flex-col items-center w-full">
                                         <div className="flex -space-x-1 mb-1">
-                                            {(() => {
-                                                const profile = task.assignee_id ? userProfiles[task.assignee_id] : null;
-                                                const avatar = profile?.avatar_url || getFallbackAvatar(task.assignee_name || 'unknown');
-                                                const name = profile?.display_name || task.assignee_name || '担当未定';
-                                                return <img src={avatar} alt={name} className="w-8 h-8 pixelated-avatar border border-black object-cover" title={name} />;
-                                            })()}
+                                            <img src={getAssigneeAvatar(task.assignee_id, task.assignee_name)} className="w-8 h-8 pixelated-avatar border border-black object-cover" />
                                         </div>
                                         <span className="text-[10px] text-center text-gray-400 truncate w-full">
                                             {task.assignee_id ? (userProfiles[task.assignee_id]?.display_name || task.assignee_name || '担当未定') : (task.assignee_name || '担当未定')}
@@ -798,6 +842,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                 assignee_id: user.id,
                 assignee_name: newTaskAssignee || displayName || user.email?.split('@')[0] || '勇者',
                 priority: newTaskPriority,
+                due_date: newTaskDueDate || null,
                 order_index: activeTasks.length // New tasks go to the end
             })
 
@@ -810,12 +855,14 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                 assignee_name: newTaskAssignee || displayName || user.email?.split('@')[0] || '勇者',
                 status: 'unstarted',
                 priority: newTaskPriority,
+                due_date: newTaskDueDate || null,
                 order_index: activeTasks.length
             };
             setTasks([newTask, ...tasks])
             setNewTaskTitle('')
             setNewTaskAssignee('')
             setNewTaskPriority('normal')
+            setNewTaskDueDate('')
         } else if (error) {
             alert('クエスト（タスク）作成エラー: ' + error.message)
         }
@@ -1260,19 +1307,29 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                 <div className="retro-window border-[var(--danger-color)] shadow-[0_0_20px_rgba(255,51,51,0.2)]">
                     <h2 className="retro-title text-[var(--danger-color)] border-[var(--danger-color)] bg-[rgba(255,51,51,0.1)]">🚨 緊急クエスト（BOSS ENCOUNTER）</h2>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        {bottleneckTasks.map((task: any) => (
-                            <div key={task.id} className="border-2 border-[var(--danger-color)] p-3 flex items-center gap-4 bg-[rgba(255,51,51,0.1)] cursor-pointer hover:translate-x-1 hover:bg-[rgba(255,51,51,0.2)] transition-all">
-                                <img 
-                                    src={getFallbackAvatar(task.assignee_name || 'unknown')} 
-                                    alt="担当者" 
-                                    className="w-12 h-12 pixelated-avatar object-cover" 
-                                />
-                                <div className="flex-grow">
-                                    <div className="text-xl mb-1">{task.title}</div>
-                                    <div className="text-[var(--danger-color)] text-sm">▶︎ HP: 進行停止中 (SOS!)</div>
+                        {bottleneckTasks.map((task: any) => {
+                            const avatar = getAssigneeAvatar(task.assignee_id, task.assignee_name);
+                            return (
+                                <div 
+                                    key={task.id} 
+                                    onClick={() => scrollToTask(task.id, task.project_id)}
+                                    className="border-2 border-[var(--danger-color)] p-3 flex items-center gap-4 bg-[rgba(255,51,51,0.1)] cursor-pointer hover:translate-x-1 hover:bg-[rgba(255,51,51,0.2)] transition-all group/emergency"
+                                >
+                                    <img 
+                                        src={avatar} 
+                                        alt="担当者" 
+                                        className="w-12 h-12 pixelated-avatar border border-[var(--danger-color)] object-cover shadow-[0_0_10px_rgba(255,51,51,0.3)]" 
+                                    />
+                                    <div className="flex-grow">
+                                        <div className="text-xl mb-1 group-hover/emergency:text-white transition-colors">{task.title}</div>
+                                        <div className="text-[var(--danger-color)] text-[10px] uppercase font-bold flex justify-between items-center">
+                                            <span>▶︎ BOSS ENCOUNTER</span>
+                                            <span className="animate-pulse">WATCH OUT!</span>
+                                        </div>
+                                    </div>
                                 </div>
-                            </div>
-                        ))}
+                            );
+                        })}
                     </div>
                 </div>
             )}
@@ -1281,19 +1338,21 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
 
                 {/* 左カラム：メインタスクエリア（広め）*/}
                 <div className="w-full lg:w-3/4 flex flex-col gap-6">
-                    {/* プロジェクト作成エリア (簡易) */}
-                    <div className="flex gap-2">
-                        <form onSubmit={createProject} className="flex gap-2 w-full">
-                            <input
-                                type="text"
-                                value={newProjectName}
-                                onChange={e => setNewProjectName(e.target.value)}
-                                placeholder="新しいプロジェクト（ギルド拠点の作成）"
-                                className="bg-black border-2 border-white p-2 text-white outline-none flex-grow text-sm font-inherit placeholder:text-gray-400 focus:bg-[#111]"
-                            />
-                            <button type="submit" className="border-2 border-white px-4 text-sm font-bold bg-black text-white hover:bg-white hover:text-black transition-all shrink-0">設立</button>
-                        </form>
-                    </div>
+                    {/* プロジェクト作成エリア (マネージャー以上のみ) */}
+                    {isManager && (
+                        <div className="flex gap-2">
+                            <form onSubmit={createProject} className="flex gap-2 w-full">
+                                <input
+                                    type="text"
+                                    value={newProjectName}
+                                    onChange={e => setNewProjectName(e.target.value)}
+                                    placeholder="新しいプロジェクト（ギルド拠点の作成）"
+                                    className="bg-black border-2 border-white p-2 text-white outline-none flex-grow text-sm font-inherit placeholder:text-gray-400 focus:bg-[#111]"
+                                />
+                                <button type="submit" className="border-2 border-white px-4 text-sm font-bold bg-black text-white hover:bg-white hover:text-black transition-all shrink-0">設立</button>
+                            </form>
+                        </div>
+                    )}
 
                     <div className="retro-window">
                         {/* 選択中のプロジェクトタイトル */}
@@ -1380,6 +1439,18 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                             <option value="elite">🟠 中ボス — 重要タスク</option>
                                             <option value="boss">🔴 大ボス — 最優先・緊急</option>
                                         </select>
+                                    </div>
+
+                                    {/* 期限（縦積み） */}
+                                    <div className="flex flex-col gap-2">
+                                        <label className="text-[11px] text-[#aaa] uppercase tracking-[0.2em] font-bold">期限（逃走日時）</label>
+                                        <input
+                                            type="datetime-local"
+                                            value={newTaskDueDate}
+                                            onChange={e => setNewTaskDueDate(e.target.value)}
+                                            className="bg-black border-4 border-white p-4 text-white outline-none text-lg font-inherit focus:bg-[#111] w-full cursor-pointer invert brightness-200"
+                                            style={{ colorScheme: 'dark' }}
+                                        />
                                     </div>
 
                                     {/* 送信ボタン */}
@@ -1486,7 +1557,12 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
 
                     {/* 👥 パーティ名簿 */}
                     <div className="retro-window">
-                        <h3 className="text-gray-400 mb-3 text-lg border-b border-gray-600 pb-1">👥 パーティ名簿</h3>
+                        <h3 className="text-gray-400 mb-2 text-lg border-b border-gray-600 pb-1">👥 パーティ名簿</h3>
+                        {activeTab !== 'all' && isManager && (
+                            <div className="text-[10px] text-yellow-500/70 mb-3 italic">
+                                ※プルダウンから仲間の役職を変更できます。
+                            </div>
+                        )}
                         {partyRoster.length === 0 ? (
                             <div className="text-sm text-gray-500">まだ誰もいません</div>
                         ) : (
