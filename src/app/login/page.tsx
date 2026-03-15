@@ -78,6 +78,14 @@ function LoginContent() {
                     <div className="bg-red-950/80 border-2 border-red-500 p-3 mb-4 text-red-100 text-sm text-left">
                         <p className="font-bold mb-1">ログインできませんでした</p>
                         <p>{loginErrorMessage}</p>
+                        <div className="mt-3">
+                            <a
+                                href="/reset-password"
+                                className="inline-block text-[11px] border border-red-400 px-2 py-1 hover:bg-red-400 hover:text-black transition-colors"
+                            >
+                                パスワードを再設定する
+                            </a>
+                        </div>
                     </div>
                 )}
                 {signupErrorMessage && (
