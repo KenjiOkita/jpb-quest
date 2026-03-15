@@ -1845,9 +1845,9 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
 
                     {/* アーカイブ */}
                     {completedTasks.length > 0 && (
-                        <div className="mt-8 border-t-2 border-dashed border-gray-600 pt-4">
-                            <h3 className="text-gray-500 mb-1 text-lg">🪦 討伐完了（アーカイブ）</h3>
-                            <div className="text-[10px] text-gray-600 mb-4">
+                        <div className="mt-8 border-t-2 border-dashed border-gray-500 pt-4 bg-black/65 backdrop-blur-[1px] px-3 md:px-4 pb-3 rounded-sm">
+                            <h3 className="text-yellow-300 mb-1 text-lg font-bold tracking-wide">🪦 討伐完了（アーカイブ）</h3>
+                            <div className="text-[11px] text-gray-300 mb-4">
                                 {activeTab === 'all'
                                     ? '各拠点ごとに完了したクエストを一覧表示しています。'
                                     : '完了した日時と完了者を記録しています（クリックで作戦会議も表示）。'}
@@ -1855,17 +1855,30 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                             {activeTab === 'all' ? (
                                 <div className="flex flex-col gap-3">
                                     {completedTasksByProject.map((group: any) => (
-                                        <div key={group.projectId} className="border border-gray-800 bg-black/40">
-                                            <div className="px-2 py-1 text-[11px] text-gray-300 border-b border-gray-800 font-bold tracking-wide">
+                                        <div key={group.projectId} className="border border-gray-600 bg-black/70 rounded-sm overflow-hidden">
+                                            <div className="px-2 py-1.5 text-[11px] text-yellow-200 border-b border-gray-700 font-bold tracking-wide bg-black/60">
                                                 🏰 {group.projectName} ({group.tasks.length})
                                             </div>
                                             <ul className="list-none p-0 m-0">
                                                 {group.tasks.map((task: any) => (
-                                                    <li key={task.id} className="px-2 py-1.5 border-b border-gray-900 last:border-b-0">
-                                                        <div className="text-[11px] text-gray-300 line-through break-words">{task.title}</div>
-                                                        <div className="text-[10px] text-gray-500 mt-0.5">
-                                                            完了: {task.completed_at ? new Date(task.completed_at).toLocaleString('ja-JP') : '日時未記録'}
+                                                    <li key={task.id} className="px-2 py-2 border-b border-gray-800 last:border-b-0 flex items-center justify-between gap-2">
+                                                        <div className="min-w-0">
+                                                            <div className="text-[11px] text-gray-100 line-through break-words">{task.title}</div>
+                                                            <div className="text-[10px] text-gray-300 mt-0.5">
+                                                                完了: {task.completed_at ? new Date(task.completed_at).toLocaleString('ja-JP') : '日時未記録'}
+                                                            </div>
+                                                            <div className="text-[10px] text-gray-400">
+                                                                完了者: {getDisplayNameByUserId(task.completed_by_user_id)}
+                                                            </div>
                                                         </div>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => markCompleted(task, false)}
+                                                            className="shrink-0 text-[10px] px-2 py-1 border border-teal-400 text-teal-200 bg-[#062323] hover:bg-[#0b3434] transition-colors"
+                                                            title="このタスクを未完了に戻す"
+                                                        >
+                                                            ↩ 復活
+                                                        </button>
                                                     </li>
                                                 ))}
                                             </ul>
@@ -1873,17 +1886,17 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                     ))}
                                 </div>
                             ) : (
-                                <ul className="list-none p-0 m-0 opacity-50">
+                                <ul className="list-none p-0 m-0">
                                     {completedTasks.map((task: any) => {
                                         const isEditingTaskTitle = editingTaskId === task.id;
                                         return (
-                                            <li key={task.id} className="border-b border-gray-800 transition-colors hover:bg-[var(--hover-bg)]">
+                                            <li key={task.id} className="border-b border-gray-700 bg-black/50 transition-colors hover:bg-black/70">
                                                 <div className="flex items-start md:items-center p-2 md:p-3 gap-2 md:gap-4">
                                                     <div className="relative shrink-0 flex items-center">
                                                         <input type="checkbox" checked={true} onChange={(e) => markCompleted(task, e.target.checked)} className="appearance-none w-5 h-5 md:w-6 md:h-6 border-2 border-gray-600 bg-black cursor-pointer align-middle" />
                                                         <span className="absolute top-[-4px] left-[2px] text-lg md:text-xl text-gray-400 pointer-events-none">✔</span>
                                                     </div>
-                                                     <div className="grow text-sm md:text-lg text-gray-500 line-through flex items-center flex-wrap gap-1.5 md:gap-2 min-w-0">
+                                                     <div className="grow text-sm md:text-lg text-gray-200 line-through flex items-center flex-wrap gap-1.5 md:gap-2 min-w-0">
                                                         {isEditingTaskTitle ? (
                                                             <div
                                                                 className="flex items-center flex-wrap gap-2 min-w-[280px] flex-1"
@@ -1955,13 +1968,22 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                                             </>
                                                         )}
                                                         {task.completed_at && (
-                                                            <span className="text-xs text-gray-600 no-underline bg-gray-900 px-2 py-1 rounded">
+                                                            <span className="text-[11px] text-gray-200 no-underline bg-black border border-gray-700 px-2 py-1 rounded">
                                                                 完了: {new Date(task.completed_at).toLocaleString('ja-JP')}
                                                             </span>
                                                         )}
-                                                        <span className="text-xs text-gray-600 no-underline bg-gray-900 px-2 py-1 rounded">
+                                                        <span className="text-[11px] text-gray-200 no-underline bg-black border border-gray-700 px-2 py-1 rounded">
                                                             完了者: {getDisplayNameByUserId(task.completed_by_user_id)}
                                                         </span>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => markCompleted(task, false)}
+                                                            className="text-[10px] px-2 py-1 border border-teal-400 text-teal-200 bg-[#062323] hover:bg-[#0b3434] transition-colors no-underline"
+                                                            style={{ textDecoration: 'none' }}
+                                                            title="このタスクを未完了に戻す"
+                                                        >
+                                                            ↩ 復活
+                                                        </button>
                                                     </div>
                                                     <div className="flex flex-col items-center gap-1 shrink-0 justify-end w-[80px]">
                                                         {(() => {
@@ -1984,7 +2006,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                                                             />
                                                                         </div>
                                                                     )}
-                                                                    <span className="text-[9px] text-gray-700 truncate w-full text-center">
+                                                                    <span className="text-[9px] text-gray-400 truncate w-full text-center">
                                                                         {isUnassigned ? '未アサイン' : name}
                                                                     </span>
                                                                 </>
