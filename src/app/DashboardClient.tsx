@@ -299,26 +299,33 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
         return found?.avatar_url || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(name)}`
     }
 
+    const normalizeAssigneeName = (value?: string | null) => (value || '').trim().toLowerCase()
+
+    const isUnassignedAssignee = (assigneeId?: string | null, assigneeName?: string | null) => {
+        const normalized = normalizeAssigneeName(assigneeName)
+        if (normalized === '未定' || normalized === '担当未定' || normalized === 'unknown' || normalized === 'unassigned' || normalized === 'none' || normalized === '?') {
+            return true
+        }
+        return !assigneeId && normalized === ''
+    }
+
     // 担当者のアバターを取得する共通ヘルパー
     const getAssigneeAvatar = (assigneeId?: string | null, assigneeName?: string | null) => {
-        if (assigneeId && userProfiles[assigneeId]) {
-            return userProfiles[assigneeId].avatar_url;
-        }
-        
-        const name = assigneeName || '';
-        const isUnassigned = !assigneeId && (!name || name === '未定' || name === 'unknown' || name === '担当未定' || name === '');
-        
-        if (isUnassigned) {
+        if (isUnassignedAssignee(assigneeId, assigneeName)) {
             // 未定用のピクセルアート（目も口もないグレーのシルエット）
             return "https://api.dicebear.com/7.x/pixel-art/svg?seed=none&backgroundColor=333333&eyes=none&mouth=none";
         }
-        
-        return getFallbackAvatar(name || 'unknown');
+
+        if (assigneeId && userProfiles[assigneeId]) {
+            return userProfiles[assigneeId].avatar_url;
+        }
+
+        const name = assigneeName || 'unknown'
+        return getFallbackAvatar(name);
     }
 
     const isUnassignedTask = (task: any) => {
-        const name = (task.assignee_name || '').trim()
-        return !task.assignee_id && (!name || name === '未定' || name === '担当未定' || name === 'unknown')
+        return isUnassignedAssignee(task.assignee_id, task.assignee_name)
     }
 
     const cleanCommentContent = (content: string, imageUrl?: string | null) => {
@@ -578,7 +585,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                             )}
                                         </div>
                                         <select
-                                            value={task.assignee_name || ''}
+                                            value={isUnassignedTask(task) ? '' : (task.assignee_name || '')}
                                             onChange={(e) => updateAssignee(task.id, e.target.value)}
                                             className="bg-black border border-gray-600 text-[9px] md:text-[9px] text-gray-300 outline-none w-full p-1 md:p-0.5 cursor-pointer hover:border-[var(--active-color)]"
                                         >
@@ -870,6 +877,10 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
         if (!newTaskTitle || activeTab === 'all') return
 
         const newTaskId = crypto.randomUUID();
+        const currentUserName = (displayName || user.email?.split('@')[0] || '勇者').trim()
+        const trimmedAssignee = (newTaskAssignee || '').trim()
+        const assigneeName = trimmedAssignee || '未定'
+        const assigneeId = trimmedAssignee ? (trimmedAssignee === currentUserName ? user.id : null) : null
 
         const { error } = await supabase
             .from('tasks')
@@ -877,8 +888,8 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                 id: newTaskId,
                 title: newTaskTitle,
                 project_id: activeTab,
-                assignee_id: user.id,
-                assignee_name: newTaskAssignee || displayName || user.email?.split('@')[0] || '勇者',
+                assignee_id: assigneeId,
+                assignee_name: assigneeName,
                 priority: newTaskPriority,
                 due_date: newTaskDueDate || null,
                 order_index: activeTasks.length // New tasks go to the end
@@ -889,8 +900,8 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                 id: newTaskId,
                 title: newTaskTitle,
                 project_id: activeTab,
-                assignee_id: user.id,
-                assignee_name: newTaskAssignee || displayName || user.email?.split('@')[0] || '勇者',
+                assignee_id: assigneeId,
+                assignee_name: assigneeName,
                 status: 'unstarted',
                 priority: newTaskPriority,
                 due_date: newTaskDueDate || null,
@@ -978,14 +989,19 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
     }
 
     const updateAssignee = async (taskId: string, newValue?: string) => {
-        const finalValue = newValue !== undefined ? newValue : editAssigneeValue
+        const rawValue = newValue !== undefined ? newValue : editAssigneeValue
+        const trimmedValue = (rawValue || '').trim()
+        const currentUserName = (displayName || user.email?.split('@')[0] || '勇者').trim()
+        const assigneeName = trimmedValue || '未定'
+        const assigneeId = trimmedValue ? (trimmedValue === currentUserName ? user.id : null) : null
+
         const { error } = await supabase
             .from('tasks')
-            .update({ assignee_name: finalValue })
+            .update({ assignee_name: assigneeName, assignee_id: assigneeId })
             .eq('id', taskId)
 
         if (!error) {
-            setTasks(tasks.map((t: any) => t.id === taskId ? { ...t, assignee_name: finalValue } : t))
+            setTasks(tasks.map((t: any) => t.id === taskId ? { ...t, assignee_name: assigneeName, assignee_id: assigneeId } : t))
         }
         setEditingAssigneeId(null)
     }
