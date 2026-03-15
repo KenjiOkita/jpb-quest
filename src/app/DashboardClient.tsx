@@ -437,11 +437,11 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                     <button
                                         type="button"
                                         onClick={() => beginTaskTitleEdit(task)}
-                                        className="ml-auto inline-flex items-center gap-1 rounded-sm px-3 py-1.5 text-[11px] font-bold border-2 border-sky-200 bg-sky-400 text-black shadow-[0_0_14px_rgba(56,189,248,0.4)] hover:bg-sky-300 transition-colors"
+                                        className="ml-auto inline-flex items-center gap-1 rounded-sm px-2 py-1 text-[10px] font-bold border border-[#9d7b3b] bg-[#231b0c] text-[#f2d78f] hover:bg-[#2e2411] transition-colors"
                                         title="タスク名を編集"
                                     >
                                         <span>✎</span>
-                                        <span>タイトル編集</span>
+                                        <span>題名変更</span>
                                     </button>
                                 )}
                                 <button
@@ -618,22 +618,22 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                                                             setEditingCommentId(comment.id)
                                                                             setEditCommentText(cleanCommentContent(comment.content, comment.image_url))
                                                                         }}
-                                                                        className="inline-flex items-center gap-1 rounded-sm px-3 py-1.5 text-xs font-bold border-2 border-yellow-300 bg-yellow-400 text-black shadow-[0_0_14px_rgba(250,204,21,0.35)] hover:bg-yellow-300 transition-colors"
+                                                                        className="inline-flex items-center gap-1 rounded-sm px-2 py-1 text-[10px] font-bold border border-yellow-600 bg-[#362c12] text-yellow-200 hover:bg-[#463816] transition-colors"
                                                                         title="このコメントを編集"
                                                                     >
                                                                         <span>✎</span>
-                                                                        <span>コメントを編集</span>
+                                                                        <span>編集</span>
                                                                     </button>
                                                                 )}
                                                                 {canDeleteComment(comment) && (
                                                                     <button
                                                                         type="button"
                                                                         onClick={() => deleteComment(comment.id)}
-                                                                        className="inline-flex items-center gap-1 rounded-sm px-3 py-1.5 text-xs font-bold border-2 border-red-300 bg-red-500 text-white shadow-[0_0_14px_rgba(239,68,68,0.35)] hover:bg-red-400 transition-colors"
+                                                                        className="inline-flex items-center gap-1 rounded-sm px-2 py-1 text-[10px] font-bold border border-red-600 bg-[#351616] text-red-200 hover:bg-[#451c1c] transition-colors"
                                                                         title="このコメントを削除"
                                                                     >
                                                                         <span>×</span>
-                                                                        <span>コメントを削除</span>
+                                                                        <span>削除</span>
                                                                     </button>
                                                                 )}
                                                             </div>
@@ -1567,11 +1567,11 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                                             <button
                                                                 type="button"
                                                                 onClick={() => beginTaskTitleEdit(task)}
-                                                                className="inline-flex items-center gap-1 rounded-sm px-3 py-1.5 text-[10px] font-bold border-2 border-sky-200 bg-sky-400 text-black shadow-[0_0_14px_rgba(56,189,248,0.35)] hover:bg-sky-300 transition-colors no-underline"
+                                                                className="inline-flex items-center gap-1 rounded-sm px-2 py-1 text-[10px] font-bold border border-[#9d7b3b] bg-[#231b0c] text-[#f2d78f] hover:bg-[#2e2411] transition-colors no-underline"
                                                                 style={{ textDecoration: 'none' }}
                                                             >
                                                                 <span>✎</span>
-                                                                <span>タイトル編集</span>
+                                                                <span>題名変更</span>
                                                             </button>
                                                         </>
                                                     )}
