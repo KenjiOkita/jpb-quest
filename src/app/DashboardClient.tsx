@@ -326,7 +326,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
             return
         }
 
-        setTasks((prev) => prev.map((task: any) => (
+        setTasks((prev: any[]) => prev.map((task: any) => (
             task.id === taskId ? { ...task, title: trimmedTitle } : task
         )))
         cancelTaskTitleEdit()
@@ -865,7 +865,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
         if (error) {
             alert('役職変更エラー: ' + error.message)
         } else {
-            setProjectMembers(prev => prev.map((m: any) => (
+            setProjectMembers((prev: any[]) => prev.map((m: any) => (
                 m.user_id === targetUserId ? { ...m, role: nextRole } : m
             )))
         }
@@ -1032,7 +1032,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
             setNewComment('')
             setNewCommentImageUrl(null)
             // コメント件数を即座にカウントアップ
-            setCommentCounts(prev => ({
+            setCommentCounts((prev: Record<string, number>) => ({
                 ...prev,
                 [taskId]: (prev[taskId] || 0) + 1
             }))
@@ -1056,7 +1056,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
             return
         }
 
-        setComments((prev) => prev.map((c: any) => (
+        setComments((prev: any[]) => prev.map((c: any) => (
             c.id === commentId ? { ...c, content: updatedContent } : c
         )))
         setEditingCommentId(null)
@@ -1074,9 +1074,9 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
             return
         }
 
-        setComments((prev) => prev.filter((c: any) => c.id !== commentId))
+        setComments((prev: any[]) => prev.filter((c: any) => c.id !== commentId))
         if (expandedTaskId && targetComment?.task_id) {
-            setCommentCounts(prev => ({
+            setCommentCounts((prev: Record<string, number>) => ({
                 ...prev,
                 [targetComment.task_id]: Math.max((prev[targetComment.task_id] || 1) - 1, 0)
             }))

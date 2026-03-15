@@ -1,12 +1,5 @@
 import type { Metadata } from 'next'
-import { DotGothic16 } from 'next/font/google'
 import './globals.css'
-
-const dotGothic = DotGothic16({ 
-  weight: '400', 
-  subsets: ['latin'],
-  variable: '--font-dot-gothic',
-})
 
 export const metadata: Metadata = {
   title: 'JPBクエスト',
@@ -20,7 +13,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="ja">
-      <body className={`${dotGothic.variable} antialiased`}>
+      <body className="antialiased">
         {children}
       </body>
     </html>
