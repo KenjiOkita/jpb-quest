@@ -968,12 +968,14 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
     }
 
     const markCompleted = async (task: any, isCompleted: boolean) => {
+        const QUEST_CLEAR_DELAY_MS = 900
+
         if (isCompleted) {
             // クエスト完了演出
             setIsQuestClearing(true)
             playLevelUpSound()
 
-            // 2秒後に実際に完了処理を行う
+            // 演出後に実際に完了処理を行う
             setTimeout(async () => {
                 const newStatus = 'completed';
                 const updateData: any = {
@@ -982,19 +984,56 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                     completed_by_user_id: user.id
                 }
 
+                // 先にローカルを更新して、完了タスクが即座に消えるようにする
+                setTasks((prev: any[]) => prev.map((t: any) => (
+                    t.id === task.id ? { ...t, status: newStatus, completed_at: updateData.completed_at, completed_by_user_id: user.id } : t
+                )))
+
                 const { error } = await supabase.from('tasks').update(updateData).eq('id', task.id)
-                if (!error) {
-                    setTasks(tasks.map((t: any) => t.id === task.id ? { ...t, status: newStatus, completed_at: updateData.completed_at, completed_by_user_id: user.id } : t))
+
+                if (error) {
+                    // completed_at カラム未適用環境でも status だけは更新できるようフォールバック
+                    const { error: fallbackError } = await supabase
+                        .from('tasks')
+                        .update({ status: newStatus })
+                        .eq('id', task.id)
+
+                    if (fallbackError) {
+                        // 失敗時はUIを元に戻す
+                        setTasks((prev: any[]) => prev.map((t: any) => (
+                            t.id === task.id
+                                ? {
+                                    ...t,
+                                    status: task.status,
+                                    completed_at: task.completed_at || null,
+                                    completed_by_user_id: task.completed_by_user_id || null,
+                                }
+                                : t
+                        )))
+                        alert('完了更新エラー: ' + fallbackError.message)
+                    }
                 }
                 setIsQuestClearing(false)
-            }, 2500)
+            }, QUEST_CLEAR_DELAY_MS)
         } else {
             // 未完了に戻す場合
             const newStatus = 'unstarted';
             const { error } = await supabase.from('tasks').update({ status: newStatus, completed_at: null, completed_by_user_id: null }).eq('id', task.id)
-            if (!error) {
-                setTasks(tasks.map((t: any) => t.id === task.id ? { ...t, status: newStatus, completed_at: null, completed_by_user_id: null } : t))
+            if (error) {
+                // completed_* カラム未適用環境向けフォールバック
+                const { error: fallbackError } = await supabase
+                    .from('tasks')
+                    .update({ status: newStatus })
+                    .eq('id', task.id)
+
+                if (fallbackError) {
+                    alert('未完了戻しエラー: ' + fallbackError.message)
+                    return
+                }
             }
+            setTasks((prev: any[]) => prev.map((t: any) => (
+                t.id === task.id ? { ...t, status: newStatus, completed_at: null, completed_by_user_id: null } : t
+            )))
         }
     }
 
