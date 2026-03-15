@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd'
@@ -25,6 +25,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
     const [editingTaskId, setEditingTaskId] = useState<string | null>(null)
     const [editTaskTitle, setEditTaskTitle] = useState('')
     const [editTaskDueDate, setEditTaskDueDate] = useState('')
+    const [isDueDatePickerOpen, setIsDueDatePickerOpen] = useState(false)
     const [newTaskPriority, setNewTaskPriority] = useState('normal') // normal, elite, boss
     const [newTaskDueDate, setNewTaskDueDate] = useState('')
     const [userRole, setUserRole] = useState<string | null>(null) // 'owner', 'admin', 'member'
@@ -41,6 +42,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
     const [userProfiles, setUserProfiles] = useState<Record<string, { display_name: string, avatar_url: string }>>({})
     const [changingRoleUserId, setChangingRoleUserId] = useState<string | null>(null)
     const [dragDestination, setDragDestination] = useState<{ droppableId: string, index: number } | null>(null)
+    const dueDateInputRef = useRef<HTMLInputElement | null>(null)
 
     const supabase = createClient()
     const router = useRouter()
@@ -282,6 +284,20 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
         return () => document.removeEventListener('mousedown', handleOutsideClick)
     }, [expandedTaskId])
 
+    useEffect(() => {
+        if (!isDueDatePickerOpen) return
+
+        const handleOutsideClick = (event: MouseEvent) => {
+            const target = event.target as HTMLElement | null
+            if (!target) return
+            if (target.closest('[data-due-picker]') || target.closest('[data-due-trigger]')) return
+            setIsDueDatePickerOpen(false)
+        }
+
+        document.addEventListener('mousedown', handleOutsideClick)
+        return () => document.removeEventListener('mousedown', handleOutsideClick)
+    }, [isDueDatePickerOpen])
+
     const isOwner = userRole === 'owner'
     const isManager = userRole === 'owner' || userRole === 'admin' // adminを軍師として扱う
 
@@ -351,12 +367,14 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
         setEditingTaskId(task.id)
         setEditTaskTitle(task.title || '')
         setEditTaskDueDate(formatDateTimeForInput(task.due_date))
+        setIsDueDatePickerOpen(false)
     }
 
     const cancelTaskTitleEdit = () => {
         setEditingTaskId(null)
         setEditTaskTitle('')
         setEditTaskDueDate('')
+        setIsDueDatePickerOpen(false)
     }
 
     const closeExpandedComments = () => {
@@ -434,6 +452,20 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
         const hh = pad(date.getHours())
         const mi = pad(date.getMinutes())
         return `${yyyy}-${mm}-${dd}T${hh}:${mi}`
+    }
+
+    const openDueDatePicker = () => {
+        setIsDueDatePickerOpen(true)
+        setTimeout(() => {
+            const input = dueDateInputRef.current
+            if (!input) return
+            input.focus()
+            try {
+                ;(input as any).showPicker?.()
+            } catch (_) {
+                // iOS Safari など showPicker 未対応ブラウザ向け
+            }
+        }, 0)
     }
 
     const saveTaskTitle = async (taskId: string) => {
@@ -520,7 +552,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
 
                             <div className="grow text-sm md:text-base flex items-center flex-wrap gap-1.5 md:gap-2.5 min-w-0">
                                 {isEditingTaskTitle ? (
-                                    <div className="flex items-center flex-wrap gap-1.5 md:gap-2 mr-1 md:mr-1.5 min-w-[200px] md:min-w-[240px] flex-1">
+                                    <div className="relative flex items-center flex-wrap gap-1.5 md:gap-2 mr-1 md:mr-1.5 min-w-[200px] md:min-w-[240px] flex-1">
                                         <input
                                             type="text"
                                             value={editTaskTitle}
@@ -535,22 +567,16 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                                 }
                                             }}
                                             autoFocus
-                                            className="min-w-0 flex-1 bg-[#1a1200] border-2 border-[var(--active-color)] px-2 py-1.5 md:px-2.5 md:py-1.5 text-sm md:text-sm text-white outline-none shadow-[0_0_0_1px_rgba(255,204,0,0.2)]"
-                                        />
-                                        <input
-                                            type="datetime-local"
-                                            value={editTaskDueDate}
-                                            onChange={(e) => setEditTaskDueDate(e.target.value)}
-                                            className="bg-black border border-gray-500 px-2 py-1.5 md:px-2.5 md:py-1.5 text-[10px] md:text-[10px] text-gray-200 outline-none"
-                                            style={{ colorScheme: 'dark' }}
+                                            className="min-w-0 flex-1 basis-full md:basis-auto bg-[#1a1200] border-2 border-[var(--active-color)] px-2 py-1.5 md:px-2.5 md:py-1.5 text-sm md:text-sm text-white outline-none shadow-[0_0_0_1px_rgba(255,204,0,0.2)]"
                                         />
                                         <button
                                             type="button"
-                                            onClick={() => setEditTaskDueDate('')}
-                                            className="shrink-0 px-2 py-1.5 md:px-2.5 md:py-1.5 text-[10px] md:text-[10px] font-bold border border-gray-700 text-gray-300 hover:border-gray-500 hover:text-white"
-                                            title="期限をクリア"
+                                            data-due-trigger="true"
+                                            onClick={openDueDatePicker}
+                                            className="shrink-0 px-2 py-1.5 md:px-2.5 md:py-1.5 text-[10px] md:text-[10px] font-bold border border-sky-700 text-sky-200 bg-[#071622] hover:bg-[#0b2234] transition-colors"
+                                            title="期限カレンダーを開く"
                                         >
-                                            期限なし
+                                            📅 期限
                                         </button>
                                         <button
                                             type="button"
@@ -566,6 +592,41 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                         >
                                             戻す
                                         </button>
+                                        {isDueDatePickerOpen && (
+                                            <div
+                                                data-due-picker="true"
+                                                className="absolute z-40 right-0 top-full mt-1 w-[min(300px,88vw)] bg-black border-2 border-sky-700 p-2 shadow-[0_6px_24px_rgba(0,0,0,0.65)]"
+                                            >
+                                                <div className="text-[10px] text-sky-200 mb-1">期限を設定</div>
+                                                <input
+                                                    ref={dueDateInputRef}
+                                                    type="datetime-local"
+                                                    value={editTaskDueDate}
+                                                    onChange={(e) => setEditTaskDueDate(e.target.value)}
+                                                    className="w-full bg-black border border-gray-500 px-2 py-1.5 text-xs text-gray-100 outline-none"
+                                                    style={{ colorScheme: 'dark' }}
+                                                />
+                                                <div className="mt-2 flex items-center justify-between gap-2">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setEditTaskDueDate('')
+                                                            setIsDueDatePickerOpen(false)
+                                                        }}
+                                                        className="text-[10px] px-2 py-1 border border-gray-600 text-gray-300 hover:border-gray-400 hover:text-white"
+                                                    >
+                                                        期限なし
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setIsDueDatePickerOpen(false)}
+                                                        className="text-[10px] px-2 py-1 border border-sky-700 text-sky-200 hover:bg-[#0b2234]"
+                                                    >
+                                                        閉じる
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
                                 ) : (
                                     <div className="flex items-center mr-1 md:mr-2 min-w-0">
@@ -1937,7 +1998,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                                      <div className="grow text-sm md:text-lg text-gray-200 line-through flex items-center flex-wrap gap-1.5 md:gap-2 min-w-0">
                                                         {isEditingTaskTitle ? (
                                                             <div
-                                                                className="flex items-center flex-wrap gap-2 min-w-[280px] flex-1"
+                                                                className="relative flex items-center flex-wrap gap-2 min-w-[280px] flex-1"
                                                                 style={{ textDecoration: 'none' }}
                                                             >
                                                                 <input
@@ -1954,22 +2015,16 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                                                         }
                                                                     }}
                                                                     autoFocus
-                                                                    className="min-w-0 flex-1 bg-[#1a1200] border border-[var(--active-color)] px-3 py-2 text-white outline-none"
-                                                                />
-                                                                <input
-                                                                    type="datetime-local"
-                                                                    value={editTaskDueDate}
-                                                                    onChange={(e) => setEditTaskDueDate(e.target.value)}
-                                                                    className="bg-black border border-gray-500 px-3 py-2 text-xs text-gray-200 outline-none"
-                                                                    style={{ colorScheme: 'dark' }}
+                                                                    className="min-w-0 flex-1 basis-full md:basis-auto bg-[#1a1200] border border-[var(--active-color)] px-3 py-2 text-white outline-none"
                                                                 />
                                                                 <button
                                                                     type="button"
-                                                                    onClick={() => setEditTaskDueDate('')}
-                                                                    className="shrink-0 px-3 py-2 text-xs font-bold border border-gray-700 text-gray-300 hover:border-gray-500 hover:text-white"
+                                                                    data-due-trigger="true"
+                                                                    onClick={openDueDatePicker}
+                                                                    className="shrink-0 px-3 py-2 text-xs font-bold border border-sky-700 text-sky-200 bg-[#071622] hover:bg-[#0b2234] transition-colors"
                                                                     style={{ textDecoration: 'none' }}
                                                                 >
-                                                                    期限なし
+                                                                    📅 期限
                                                                 </button>
                                                                 <button
                                                                     type="button"
@@ -1985,6 +2040,42 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                                                 >
                                                                     戻す
                                                                 </button>
+                                                                {isDueDatePickerOpen && (
+                                                                    <div
+                                                                        data-due-picker="true"
+                                                                        className="absolute z-40 right-0 top-full mt-1 w-[min(300px,88vw)] bg-black border-2 border-sky-700 p-2 shadow-[0_6px_24px_rgba(0,0,0,0.65)]"
+                                                                        style={{ textDecoration: 'none' }}
+                                                                    >
+                                                                        <div className="text-[10px] text-sky-200 mb-1">期限を設定</div>
+                                                                        <input
+                                                                            ref={dueDateInputRef}
+                                                                            type="datetime-local"
+                                                                            value={editTaskDueDate}
+                                                                            onChange={(e) => setEditTaskDueDate(e.target.value)}
+                                                                            className="w-full bg-black border border-gray-500 px-2 py-1.5 text-xs text-gray-100 outline-none"
+                                                                            style={{ colorScheme: 'dark' }}
+                                                                        />
+                                                                        <div className="mt-2 flex items-center justify-between gap-2">
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => {
+                                                                                    setEditTaskDueDate('')
+                                                                                    setIsDueDatePickerOpen(false)
+                                                                                }}
+                                                                                className="text-[10px] px-2 py-1 border border-gray-600 text-gray-300 hover:border-gray-400 hover:text-white"
+                                                                            >
+                                                                                期限なし
+                                                                            </button>
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => setIsDueDatePickerOpen(false)}
+                                                                                className="text-[10px] px-2 py-1 border border-sky-700 text-sky-200 hover:bg-[#0b2234]"
+                                                                            >
+                                                                                閉じる
+                                                                            </button>
+                                                                        </div>
+                                                                    </div>
+                                                                )}
                                                             </div>
                                                         ) : (
                                                             <>
