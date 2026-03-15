@@ -305,7 +305,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
         }
         
         const name = assigneeName || '';
-        const isUnassigned = !assigneeId && (name === '未定' || name === '' || name === 'unknown' || name === '担当未定');
+        const isUnassigned = !assigneeId && (!name || name === '未定' || name === 'unknown' || name === '担当未定' || name === '');
         
         if (isUnassigned) {
             // 未定用のピクセルアート（目も口もないグレーのシルエット）
@@ -1152,7 +1152,9 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
 
     // タスクを未完了と完了済みに分ける
     const visibleTasks = useMemo(() => {
-        const filtered = activeTab === 'all' ? tasks : tasks.filter((t: any) => t.project_id === activeTab)
+        const filtered = activeTab === 'all' 
+            ? tasks.filter((t: any) => t.status !== 'completed') 
+            : tasks.filter((t: any) => t.project_id === activeTab && t.status !== 'completed')
         // Sort by order_index primarily
         return filtered.sort((a: any, b: any) => (a.order_index || 0) - (b.order_index || 0))
     }, [tasks, activeTab])
