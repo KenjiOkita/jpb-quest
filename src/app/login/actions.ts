@@ -4,6 +4,19 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 
+function mapAuthErrorToCode(message: string) {
+    const normalized = message.toLowerCase()
+
+    if (normalized.includes('invalid login credentials')) return 'invalid_credentials'
+    if (normalized.includes('email not confirmed')) return 'email_not_confirmed'
+    if (normalized.includes('too many requests')) return 'too_many_requests'
+    if (normalized.includes('network') || normalized.includes('fetch')) return 'network'
+    if (normalized.includes('password should be at least')) return 'weak_password'
+    if (normalized.includes('user already registered')) return 'user_exists'
+
+    return 'unknown'
+}
+
 export async function login(formData: FormData) {
     const supabase = await createClient()
     const email = (formData.get('email') as string | null)?.trim().toLowerCase() || ''
@@ -19,7 +32,8 @@ export async function login(formData: FormData) {
     const { error } = await supabase.auth.signInWithPassword(data)
 
     if (error) {
-        redirect(`/error?message=${encodeURIComponent(error.message)}`)
+        const code = mapAuthErrorToCode(error.message)
+        redirect(`/login?error=${encodeURIComponent(code)}`)
     }
 
     revalidatePath('/', 'layout')
@@ -48,7 +62,8 @@ export async function signup(formData: FormData) {
     })
 
     if (error) {
-        redirect(`/error?message=${encodeURIComponent(error.message)}`)
+        const code = mapAuthErrorToCode(error.message)
+        redirect(`/login?signup_error=${encodeURIComponent(code)}`)
     }
 
     // After signup, redirect to login with success message 

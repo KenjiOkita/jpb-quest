@@ -36,6 +36,28 @@ function SubmitButton({ label, loadingLabel, isPrimary = true }: { label: string
 function LoginContent() {
     const searchParams = useSearchParams()
     const isSuccess = searchParams.get('success') === 'true'
+    const loginError = searchParams.get('error')
+    const signupError = searchParams.get('signup_error')
+
+    const getErrorMessage = (code: string | null, mode: 'login' | 'signup') => {
+        if (!code) return null
+        if (code === 'invalid_credentials') {
+            return mode === 'login'
+                ? 'メールアドレスが未登録、またはパスワードが違います。'
+                : '登録に失敗しました。入力情報を確認してください。'
+        }
+        if (code === 'email_not_confirmed') return 'メール認証が未完了です。受信メールの認証リンクを開いてください。'
+        if (code === 'too_many_requests') return '試行回数が多すぎます。少し待ってから再試行してください。'
+        if (code === 'network') return '通信エラーが発生しました。電波状況を確認して再試行してください。'
+        if (code === 'weak_password') return 'パスワードが弱すぎます。より長く複雑なものを設定してください。'
+        if (code === 'user_exists') return 'このメールアドレスはすでに登録済みです。ログインをお試しください。'
+        return mode === 'login'
+            ? 'ログインに失敗しました。入力情報を確認して再試行してください。'
+            : '新規登録に失敗しました。入力情報を確認して再試行してください。'
+    }
+
+    const loginErrorMessage = getErrorMessage(loginError, 'login')
+    const signupErrorMessage = getErrorMessage(signupError, 'signup')
 
     return (
         <div className="min-h-screen flex items-center justify-center relative pointer-events-auto overflow-hidden">
@@ -50,6 +72,18 @@ function LoginContent() {
                     <div className="bg-green-900 border-2 border-green-400 p-4 mb-6 text-green-100 text-sm animate-bounce text-center">
                         ✨ 冒険者登録に成功しました！ ✨<br />
                         そのままログインして冒険を開始してください。
+                    </div>
+                )}
+                {loginErrorMessage && (
+                    <div className="bg-red-950/80 border-2 border-red-500 p-3 mb-4 text-red-100 text-sm text-left">
+                        <p className="font-bold mb-1">ログインできませんでした</p>
+                        <p>{loginErrorMessage}</p>
+                    </div>
+                )}
+                {signupErrorMessage && (
+                    <div className="bg-yellow-950/80 border-2 border-yellow-600 p-3 mb-4 text-yellow-100 text-sm text-left">
+                        <p className="font-bold mb-1">新規登録に失敗しました</p>
+                        <p>{signupErrorMessage}</p>
                     </div>
                 )}
 
