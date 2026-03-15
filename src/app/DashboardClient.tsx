@@ -276,52 +276,44 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                 )}
                             </div>
 
-                            <div className="flex flex-col items-center gap-1 w-[110px] shrink-0 justify-end mt-2 md:mt-0 relative" onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                setEditingAssigneeId(task.id);
-                                setEditAssigneeValue(task.assignee_name || '');
-                            }}>
-                                {editingAssigneeId === task.id ? (
-                                    <div className="flex items-center gap-1 w-[160px] bg-[#111] border-2 border-[var(--active-color)] p-1 absolute bottom-0 right-0 z-20 shadow-[0_0_10px_rgba(255,170,0,0.5)]">
-                                        <span className="text-[var(--active-color)] text-xs animate-pulse">▶︎</span>
+                            <div className="flex flex-col items-center w-[80px] shrink-0 border-l border-white/10 ml-4 pl-4 pt-1">
+                                <div className="text-[9px] text-gray-500 uppercase tracking-tighter mb-2">担当冒険者</div>
+                                {isManager ? (
+                                    <div className="flex flex-col items-center w-full gap-2">
+                                        <div className="flex -space-x-1">
+                                            {(() => {
+                                                const profile = task.assignee_id ? userProfiles[task.assignee_id] : null;
+                                                const avatar = profile?.avatar_url || getFallbackAvatar(task.assignee_name || 'unknown');
+                                                return <img src={avatar} className="w-8 h-8 pixelated-avatar border border-black shadow-sm object-cover" />;
+                                            })()}
+                                        </div>
                                         <select
-                                            autoFocus
-                                            value={editAssigneeValue}
-                                            onChange={(e) => {
-                                                setEditAssigneeValue(e.target.value);
-                                                updateAssignee(task.id, e.target.value);
-                                            }}
-                                            onBlur={() => setEditingAssigneeId(null)}
-                                            className="w-full text-xs text-white bg-black border-none outline-none font-inherit cursor-pointer"
+                                            value={task.assignee_name || ''}
+                                            onChange={(e) => updateAssignee(task.id, e.target.value)}
+                                            className="bg-black border border-gray-600 text-[10px] text-gray-300 outline-none w-full p-1 cursor-pointer hover:border-[var(--active-color)]"
                                         >
-                                            <option value="">担当未定</option>
+                                            <option value="">未定</option>
                                             {partyMembers.map((name, i) => (
                                                 <option key={i} value={name as string}>{name as string}</option>
                                             ))}
                                         </select>
                                     </div>
                                 ) : (
-                                    <div className="group/assignee flex flex-col items-center w-full cursor-pointer hover:bg-[#222] p-1 border border-transparent hover:border-[#444] transition-all">
+                                    <div className="group/assignee flex flex-col items-center w-full">
                                         <div className="flex -space-x-1 mb-1">
-                                            {assignees.map((name: string, i: number) => (
-                                                <img 
-                                                    key={i} 
-                                                    src={getFallbackAvatar(name)} 
-                                                    alt={name} 
-                                                    className="w-7 h-7 pixelated-avatar border border-black shadow-sm shadow-white/10 object-cover" 
-                                                    style={{ zIndex: 10 - i }} 
-                                                />
-                                            ))}
+                                            {(() => {
+                                                const profile = task.assignee_id ? userProfiles[task.assignee_id] : null;
+                                                const avatar = profile?.avatar_url || getFallbackAvatar(task.assignee_name || 'unknown');
+                                                const name = profile?.display_name || task.assignee_name || '担当未定';
+                                                return <img src={avatar} alt={name} className="w-8 h-8 pixelated-avatar border border-black object-cover" title={name} />;
+                                            })()}
                                         </div>
-                                        <span className="text-[10px] text-center text-gray-400 truncate w-full group-hover/assignee:text-[var(--active-color)] flex items-center justify-center gap-1">
-                                            <span className="opacity-0 group-hover/assignee:opacity-100 transition-opacity text-[var(--active-color)]">▶︎</span>
-                                            {task.assignee_name ? task.assignee_name : '担当未定'}
+                                        <span className="text-[10px] text-center text-gray-400 truncate w-full">
+                                            {task.assignee_id ? (userProfiles[task.assignee_id]?.display_name || task.assignee_name || '担当未定') : (task.assignee_name || '担当未定')}
                                         </span>
                                     </div>
                                 )}
                             </div>
-
                         </div>
 
                         {/* 💬 作戦会議（コメント）エリア展開 */}
@@ -799,13 +791,19 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                             </div>
 
                             {activeTab !== 'all' && (
-                                <div className="bg-[#111] p-3 border border-gray-800 text-[10px]">
-                                    <div className="flex justify-between items-center">
-                                        <div>
-                                            <span className="text-gray-500 uppercase tracking-widest mr-2">Secret Invite Spell (招待コード):</span>
-                                            <span className="text-yellow-500 font-mono font-bold select-all">{projectInviteCode || 'LOADING...'}</span>
+                                <div className="bg-yellow-900/10 p-4 border-2 border-dashed border-yellow-600/30 rounded-sm">
+                                    <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-3">
+                                        <div className="flex items-center gap-3">
+                                            <span className="text-2xl animate-bounce">📜</span>
+                                            <div>
+                                                <div className="text-[10px] text-yellow-500/70 uppercase tracking-[0.2em] font-bold mb-1">Secret Invite Spell (招待の呪文)</div>
+                                                <div className="text-xl text-yellow-400 font-mono font-bold select-all tracking-wider shadow-yellow-500/20 drop-shadow-sm">{projectInviteCode || 'LOADING...'}</div>
+                                            </div>
                                         </div>
-                                        <div className="text-gray-600 italic">この呪文を仲間に伝えてパーティに招待せよ</div>
+                                        <div className="text-[10px] text-yellow-600/80 italic glass-panel p-2 border border-yellow-600/20 bg-black/40">
+                                            この「呪文」を仲間に伝えてパーティ（拠点）に招待せよ。<br />
+                                            仲間が右側の欄にこのコードを入力すれば、パーティに加わることができる。
+                                        </div>
                                     </div>
                                 </div>
                             )}
@@ -995,56 +993,29 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                                     <input type="checkbox" checked={true} onChange={(e) => markCompleted(task, e.target.checked)} className="appearance-none w-6 h-6 border-2 border-gray-600 bg-black cursor-pointer align-middle" />
                                                     <span className="absolute top-[-4px] left-[2px] text-xl text-gray-400 pointer-events-none">✔</span>
                                                 </div>
-                                                <div className="grow text-lg text-gray-500 line-through flex items-center flex-wrap gap-2">
+                                                 <div className="grow text-lg text-gray-500 line-through flex items-center flex-wrap gap-2">
                                                     <span
                                                         className="cursor-pointer hover:underline decoration-gray-500 underline-offset-4"
                                                         onClick={() => toggleTaskExpansion(task.id)}
-                                                        title="クリックで作戦会議（コメント）を開く"
                                                     >
                                                         {task.title}
                                                     </span>
-                                                    {task.completed_at && <span className="text-xs text-gray-600 no-underline bg-gray-900 px-2 py-1 rounded">完了: {new Date(task.completed_at).toLocaleDateString()}</span>}
-                                                    <span
-                                                        className="ml-auto text-xs text-gray-700 hover:text-gray-400 cursor-pointer"
-                                                        onClick={() => toggleTaskExpansion(task.id)}
-                                                        title="作戦会議"
-                                                    >
-                                                        💬
-                                                    </span>
+                                                    {task.completed_at && <span className="text-xs text-gray-600 no-underline bg-gray-900 px-2 py-1 rounded">討伐日: {new Date(task.completed_at).toLocaleDateString()}</span>}
                                                 </div>
-                                                <div className="flex flex-col items-center gap-1 shrink-0 justify-end w-[60px] relative" onClick={(e) => {
-                                                    e.preventDefault();
-                                                    setEditingAssigneeId(task.id);
-                                                    setEditAssigneeValue(task.assignee_name || '');
-                                                }}>
-                                                    {editingAssigneeId === task.id ? (
-                                                        <div className="flex items-center gap-1 w-[120px] mt-1 bg-black border border-gray-600 p-1 absolute bottom-0 right-0 z-10 shadow-lg">
-                                                            <span className="text-gray-400 text-[10px] animate-pulse">▶︎</span>
-                                                            <input
-                                                                autoFocus
-                                                                type="text"
-                                                                list="party-members"
-                                                                value={editAssigneeValue}
-                                                                onChange={(e) => setEditAssigneeValue(e.target.value)}
-                                                                onBlur={() => updateAssignee(task.id)}
-                                                                onKeyDown={(e) => {
-                                                                    if (e.key === 'Enter') updateAssignee(task.id)
-                                                                }}
-                                                                className="w-full text-[10px] text-gray-300 bg-transparent outline-none"
-                                                            />
-                                                        </div>
-                                                    ) : (
-                                                        <>
-                                                            <div className="flex -space-x-2 hover:scale-105 transition-transform cursor-pointer" title="クリックして担当者を変更">
-                                                                {assignees.map((name: string, i: number) => (
-                                                                    <img key={i} src={getFallbackAvatar(name)} alt={name} className="w-6 h-6 pixelated-avatar grayscale border border-gray-800" style={{ zIndex: 10 - i }} />
-                                                                ))}
-                                                            </div>
-                                                            <span className="text-[10px] text-gray-600 truncate w-full text-center cursor-pointer hover:text-gray-400" title="クリックして担当者を変更">
-                                                                {task.assignee_name ? task.assignee_name : '担当未定'}
-                                                            </span>
-                                                        </>
-                                                    )}
+                                                <div className="flex flex-col items-center gap-1 shrink-0 justify-end w-[80px]">
+                                                    {(() => {
+                                                        const profile = task.assignee_id ? userProfiles[task.assignee_id] : null;
+                                                        const avatar = profile?.avatar_url || getFallbackAvatar(task.assignee_name || 'unknown');
+                                                        const name = profile?.display_name || task.assignee_name || '担当未定';
+                                                        return (
+                                                            <>
+                                                                <img src={avatar} alt={name} className="w-6 h-6 pixelated-avatar grayscale border border-gray-800 object-cover" title={name} />
+                                                                <span className="text-[9px] text-gray-700 truncate w-full text-center">
+                                                                    {name}
+                                                                </span>
+                                                            </>
+                                                        );
+                                                    })()}
                                                 </div>
                                             </div>
 
