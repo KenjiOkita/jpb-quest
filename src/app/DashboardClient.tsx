@@ -301,7 +301,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
     useEffect(() => {
         if (!editingTaskId) return
 
-        const handleOutsideEditClick = (event: PointerEvent) => {
+        const handleOutsideEditClick = (event: Event) => {
             const target = event.target as HTMLElement | null
             if (!target) return
             if (target.closest('[data-task-edit-panel]') || target.closest('[data-task-edit-trigger]')) return
@@ -313,8 +313,15 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
             setIsDueDatePickerOpen(false)
         }
 
-        document.addEventListener('pointerdown', handleOutsideEditClick)
-        return () => document.removeEventListener('pointerdown', handleOutsideEditClick)
+        // iOS Safari 含め確実に拾うため、キャプチャ段階で複数イベントを監視
+        document.addEventListener('pointerdown', handleOutsideEditClick, true)
+        document.addEventListener('mousedown', handleOutsideEditClick, true)
+        document.addEventListener('touchstart', handleOutsideEditClick, true)
+        return () => {
+            document.removeEventListener('pointerdown', handleOutsideEditClick, true)
+            document.removeEventListener('mousedown', handleOutsideEditClick, true)
+            document.removeEventListener('touchstart', handleOutsideEditClick, true)
+        }
     }, [editingTaskId])
 
     const isOwner = userRole === 'owner'
