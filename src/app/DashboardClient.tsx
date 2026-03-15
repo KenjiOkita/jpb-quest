@@ -879,9 +879,21 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
             return Array.from(new Set(names)).sort()
         }
 
-        const namesFromTasks = tasks.flatMap((t: any) => (t.assignee_name || '').split(/[,、\s]+/).filter(Boolean));
+        // 全体マップでは、assignee_id があるタスクは最新プロフィール名を優先して使う
+        const namesFromProfiles = tasks
+            .map((t: any) => {
+                if (!t.assignee_id) return null
+                return userProfiles[t.assignee_id]?.display_name || null
+            })
+            .filter(Boolean) as string[]
+
+        // assignee_id が無い古いタスクだけ従来の文字列を使う
+        const legacyNames = tasks
+            .filter((t: any) => !t.assignee_id)
+            .flatMap((t: any) => (t.assignee_name || '').split(/[,、\s]+/).filter(Boolean))
+
         const currentUser = displayName || user.email?.split('@')[0] || '勇者';
-        return Array.from(new Set([currentUser, ...namesFromTasks])).sort();
+        return Array.from(new Set([currentUser, ...namesFromProfiles, ...legacyNames])).sort();
     }, [activeTab, projectMembers, userProfiles, displayName, user.email, user.id, tasks]);
 
     const partyRoster = useMemo(() => {
