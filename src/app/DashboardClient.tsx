@@ -18,6 +18,8 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
     const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null)
     const [comments, setComments] = useState<any[]>([])
     const [newComment, setNewComment] = useState('')
+    const [newCommentImageUrl, setNewCommentImageUrl] = useState<string | null>(null)
+    const [zoomImageUrl, setZoomImageUrl] = useState<string | null>(null)
     const [newTaskPriority, setNewTaskPriority] = useState('normal') // normal, elite, boss
     const [userRole, setUserRole] = useState<string | null>(null) // 'owner', 'admin', 'member'
     const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
@@ -276,6 +278,15 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
         return found?.avatar_url || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(name)}`
     }
 
+    const cleanCommentContent = (content: string, imageUrl?: string | null) => {
+        if (!content) return ''
+        let cleaned = content
+        if (imageUrl) {
+            cleaned = cleaned.replaceAll(imageUrl, '')
+        }
+        return cleaned.replace(/\n{3,}/g, '\n\n').trim()
+    }
+
     const renderTaskItem = (task: any, index: number) => {
         const isProgress = task.status === 'progress';
         const assignees = (task.assignee_name || '担当未定').split(/[,、\s]+/).filter(Boolean).slice(0, 5);
@@ -433,7 +444,11 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                                                 {new Date(comment.created_at).toLocaleString('ja-JP')}
                                                             </span>
                                                         </div>
-                                                        <p className="text-sm leading-relaxed text-gray-200 whitespace-pre-wrap mb-2">{comment.content}</p>
+                                                        {cleanCommentContent(comment.content, comment.image_url) && (
+                                                            <p className="text-sm leading-relaxed text-gray-200 whitespace-pre-wrap mb-2">
+                                                                {cleanCommentContent(comment.content, comment.image_url)}
+                                                            </p>
+                                                        )}
                                                         
                                                         {/* 🖼️ 画像表示 */}
                                                         {comment.image_url && (
@@ -442,7 +457,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                                                     src={comment.image_url} 
                                                                     alt="添付画像" 
                                                                     className="max-w-full max-h-[300px] object-contain cursor-zoom-in" 
-                                                                    onClick={() => window.open(comment.image_url, '_blank')}
+                                                                    onClick={() => setZoomImageUrl(comment.image_url)}
                                                                 />
                                                             </div>
                                                         )}
@@ -506,7 +521,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                                         const result = await response.json();
                                                         
                                                         if (result.url) {
-                                                            setNewComment(prev => `${prev}\n${result.url}`);
+                                                            setNewCommentImageUrl(result.url);
                                                         } else {
                                                             alert('アップロード失敗: ' + (result.error || '不明なエラー'));
                                                         }
@@ -527,10 +542,22 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                         rows={4}
                                         className="w-full bg-black border-2 border-[#555] p-3 text-white text-sm outline-none focus:border-[var(--active-color)] transition-all resize-none font-inherit leading-relaxed"
                                     />
+                                    {newCommentImageUrl && (
+                                        <div className="flex items-center justify-between text-xs border border-[#444] bg-black/70 px-3 py-2">
+                                            <span className="text-gray-300 truncate">📷 画像を添付済み</span>
+                                            <button
+                                                type="button"
+                                                onClick={() => setNewCommentImageUrl(null)}
+                                                className="text-gray-400 hover:text-red-400"
+                                            >
+                                                削除
+                                            </button>
+                                        </div>
+                                    )}
                                     <div className="flex justify-end mt-1">
                                         <button
                                             type="submit"
-                                            disabled={!newComment.trim()}
+                                            disabled={!newComment.trim() && !newCommentImageUrl}
                                             className="px-8 py-2 bg-[#222] border-2 border-[#555] text-white text-sm font-bold hover:bg-[var(--active-color)] hover:text-black hover:scale-105 transition-all shadow-[0_4px_0_#000]"
                                         >
                                             書き込む
@@ -812,10 +839,12 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
         if (expandedTaskId === taskId) {
             setExpandedTaskId(null)
             setComments([])
+            setNewCommentImageUrl(null)
             return
         }
 
         setExpandedTaskId(taskId)
+        setNewCommentImageUrl(null)
         const { data, error } = await supabase
             .from('comments')
             .select('*')
@@ -829,7 +858,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
 
     const submitComment = async (e: React.FormEvent, taskId: string) => {
         e.preventDefault()
-        if (!newComment.trim()) return
+        if (!newComment.trim() && !newCommentImageUrl) return
 
         const { data, error } = await supabase
             .from('comments')
@@ -838,13 +867,14 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                 user_id: user.id,
                 user_email: user.email,
                 content: newComment,
-                image_url: newComment.match(/https?:\/\/[^\s]+(?:\.jpg|\.jpeg|\.png|\.gif)/i)?.[0] || null
+                image_url: newCommentImageUrl || null
             })
             .select()
 
         if (!error && data) {
             setComments([...comments, data[0]])
             setNewComment('')
+            setNewCommentImageUrl(null)
             // コメント件数を即座にカウントアップ
             setCommentCounts(prev => ({
                 ...prev,
@@ -936,6 +966,21 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
 
     return (
         <main className="py-12 min-h-screen relative max-w-4xl mx-auto px-4">
+            {zoomImageUrl && (
+                <div
+                    className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+                    onClick={() => setZoomImageUrl(null)}
+                >
+                    <div className="max-w-5xl max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
+                        <img
+                            src={zoomImageUrl}
+                            alt="拡大画像"
+                            className="max-w-full max-h-[90vh] object-contain border-2 border-white shadow-[0_0_30px_rgba(255,255,255,0.2)]"
+                        />
+                    </div>
+                </div>
+            )}
+
             {/* 🌟 クエスト完了演出オーバーレイ */}
             {isQuestClearing && (
                 <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm animate-in fade-in duration-500">
@@ -1329,7 +1374,9 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                                                                 {new Date(comment.created_at).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                                                                             </span>
                                                                         </div>
-                                                                        <p className="text-xs text-gray-400 whitespace-pre-wrap leading-relaxed">{comment.content}</p>
+                                                                        <p className="text-xs text-gray-400 whitespace-pre-wrap leading-relaxed">
+                                                                            {cleanCommentContent(comment.content, comment.image_url)}
+                                                                        </p>
                                                                     </div>
                                                                 </div>
                                                             ))
