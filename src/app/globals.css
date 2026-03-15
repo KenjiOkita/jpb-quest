@@ -82,4 +82,20 @@
     image-rendering: pixelated;
     object-fit: cover;
   }
+
+  .comment-panel-enter {
+    animation: commentPanelEnter 180ms cubic-bezier(0.22, 1, 0.36, 1);
+    transform-origin: top center;
+  }
+}
+
+@keyframes commentPanelEnter {
+  0% {
+    opacity: 0;
+    transform: scale(0.98) translateY(-8px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
 }

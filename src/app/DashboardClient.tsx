@@ -264,6 +264,21 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
         fetchMyRole()
     }, [activeTab])
 
+    useEffect(() => {
+        const handleOutsideClick = (event: MouseEvent) => {
+            if (!expandedTaskId) return
+            const target = event.target as HTMLElement | null
+            if (!target) return
+            if (target.closest('[data-comment-panel]') || target.closest('[data-comment-trigger]')) return
+            setExpandedTaskId(null)
+            setComments([])
+            setNewCommentImageUrl(null)
+        }
+
+        document.addEventListener('mousedown', handleOutsideClick)
+        return () => document.removeEventListener('mousedown', handleOutsideClick)
+    }, [expandedTaskId])
+
     const isOwner = userRole === 'owner'
     const isManager = userRole === 'owner' || userRole === 'admin' // adminを軍師として扱う
 
@@ -307,6 +322,12 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
     const cancelTaskTitleEdit = () => {
         setEditingTaskId(null)
         setEditTaskTitle('')
+    }
+
+    const closeExpandedComments = () => {
+        setExpandedTaskId(null)
+        setComments([])
+        setNewCommentImageUrl(null)
     }
 
     const saveTaskTitle = async (taskId: string) => {
@@ -407,8 +428,8 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                         <span
                                             className={`cursor-pointer hover:underline decoration-[var(--active-color)] underline-offset-4 
                                                 ${isBoss ? 'text-[#ff4444] font-bold text-2xl tracking-tighter' : isElite ? 'text-[#ffaa00] font-bold text-xl' : ''}`}
-                                            onClick={() => toggleTaskExpansion(task.id)}
-                                            title="クリックで作戦会議（コメント）を開く"
+                                            onClick={closeExpandedComments}
+                                            title="開いている作戦会議を閉じる"
                                         >
                                             {task.title}
                                         </span>
@@ -446,6 +467,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                 )}
                                 <button
                                     type="button"
+                                    data-comment-trigger="true"
                                     className="text-xs text-gray-200 bg-[#221400] border border-yellow-700 cursor-pointer flex items-center gap-1 px-2.5 py-1.5 shadow-[0_0_10px_rgba(234,179,8,0.18)] hover:bg-[#3a2400] transition-colors"
                                     onClick={() => toggleTaskExpansion(task.id)}
                                     title="作戦会議"
@@ -511,12 +533,12 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
 
                         {/* 💬 作戦会議（コメント）エリア展開 */}
                         {expandedTaskId === task.id && (
-                            <div className="bg-[#111] p-4 border-t border-[#333] ml-11 mr-4 mb-4 rounded-sm border-2 border-dashed border-[#555]">
+                            <div data-comment-panel="true" className="comment-panel-enter bg-[#111] p-4 border-t border-[#333] ml-11 mr-4 mb-4 rounded-sm border-2 border-dashed border-[#555]">
                                 <h4 className="text-[var(--active-color)] mb-3 text-sm flex items-center gap-2 font-bold px-2 border-l-4 border-[var(--active-color)]">
                                     <span>💬 作戦会議（指令・報告）</span>
                                 </h4>
 
-                                <div className="flex flex-col gap-4 mb-5 max-h-[400px] overflow-y-auto pr-3 custom-scrollbar">
+                                <div className="flex flex-col gap-4 mb-5 pr-3">
                                     {comments.length === 0 ? (
                                         <div className="text-gray-500 text-sm text-center py-6 border border-dashed border-[#333]">まだ英雄たちの記録はありません。</div>
                                     ) : (
@@ -993,9 +1015,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
 
     const toggleTaskExpansion = async (taskId: string) => {
         if (expandedTaskId === taskId) {
-            setExpandedTaskId(null)
-            setComments([])
-            setNewCommentImageUrl(null)
+            closeExpandedComments()
             return
         }
 
@@ -1603,12 +1623,12 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
 
                                             {/* 💬 作戦会議（コメント）エリア展開 - アーカイブ版 */}
                                             {expandedTaskId === task.id && (
-                                                <div className="bg-[#111] p-3 border-t border-[#222] ml-9 mr-3 mb-3 rounded-sm border border-dashed border-[#444] opacity-80">
+                                                <div data-comment-panel="true" className="comment-panel-enter bg-[#111] p-3 border-t border-[#222] ml-9 mr-3 mb-3 rounded-sm border border-dashed border-[#444] opacity-80">
                                                     <h4 className="text-gray-500 mb-2 text-xs flex items-center gap-2">
                                                         <span>💬 作戦会議（過去の記録）</span>
                                                     </h4>
 
-                                                    <div className="flex flex-col gap-2 mb-3 max-h-[200px] overflow-y-auto pr-2">
+                                                    <div className="flex flex-col gap-2 mb-3 pr-2">
                                                         {comments.length === 0 ? (
                                                             <div className="text-gray-600 text-[10px] text-center py-1">記録はありません。</div>
                                                         ) : (
