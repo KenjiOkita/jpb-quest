@@ -1595,7 +1595,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                         </label>
                     </div>
                     <div>
-                        <h1 className="hero-name-pixel text-3xl md:text-4xl text-white uppercase tracking-wider mb-1" style={{ textShadow: '2px 2px 0 #000, 4px 4px 0 #444' }}>
+                        <h1 className="hero-name-pixel text-3xl md:text-4xl text-white uppercase tracking-wider mb-1">
                             {displayName}
                         </h1>
                         <div className="flex items-center gap-2">

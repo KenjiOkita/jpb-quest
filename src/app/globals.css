@@ -91,11 +91,18 @@
 
   .hero-name-pixel {
     font-family: "DotGothic16", "MS Gothic", "Osaka-Mono", "Courier New", "Menlo", "Monaco", monospace;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.06em;
     font-weight: 700;
     -webkit-font-smoothing: none !important;
     font-smooth: never;
     text-rendering: optimizeSpeed;
+    line-height: 1.05;
+    text-shadow:
+      1px 0 0 currentColor,
+      0 1px 0 currentColor,
+      1px 1px 0 currentColor,
+      3px 3px 0 #000,
+      5px 5px 0 #333;
   }
 
   .pixel-heading-jp {
@@ -103,6 +110,13 @@
     letter-spacing: 0.06em;
     -webkit-font-smoothing: none !important;
     text-rendering: optimizeSpeed;
+    line-height: 1.1;
+    text-shadow:
+      1px 0 0 currentColor,
+      0 1px 0 currentColor,
+      1px 1px 0 currentColor,
+      2px 2px 0 rgba(0, 0, 0, 0.9),
+      4px 4px 0 rgba(0, 0, 0, 0.65);
   }
 }
 
