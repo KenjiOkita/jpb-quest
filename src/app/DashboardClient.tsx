@@ -31,6 +31,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
     const [projectMembers, setProjectMembers] = useState<any[]>([])
     const [isQuestClearing, setIsQuestClearing] = useState(false)
     const [userProfiles, setUserProfiles] = useState<Record<string, { display_name: string, avatar_url: string }>>({})
+    const [changingRoleUserId, setChangingRoleUserId] = useState<string | null>(null)
 
     const supabase = createClient()
     const router = useRouter()
@@ -212,6 +213,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
             setUserRole('admin') // 全体マップでは全表示
             setActiveProject(null)
             setProjectInviteCode(null)
+            setProjectMembers([])
             return
         }
 
@@ -657,6 +659,37 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
         setEditingAssigneeId(null)
     }
 
+    const canEditMemberRole = (targetUserId: string, targetRole: string) => {
+        if (activeTab === 'all') return false
+        if (targetUserId === user.id) return false
+        if (targetRole === 'owner') return false
+        if (userRole === 'owner') return true
+        if (userRole === 'admin') return targetRole === 'member'
+        return false
+    }
+
+    const updateMemberRole = async (targetUserId: string, nextRole: string) => {
+        if (activeTab === 'all') return
+        if (!canEditMemberRole(targetUserId, projectMembers.find((m: any) => m.user_id === targetUserId)?.role || 'member')) return
+        setChangingRoleUserId(targetUserId)
+
+        const { error } = await supabase.rpc('set_project_member_role', {
+            target_project_id: activeTab,
+            target_user_id: targetUserId,
+            new_role: nextRole
+        })
+
+        if (error) {
+            alert('役職変更エラー: ' + error.message)
+        } else {
+            setProjectMembers(prev => prev.map((m: any) => (
+                m.user_id === targetUserId ? { ...m, role: nextRole } : m
+            )))
+        }
+
+        setChangingRoleUserId(null)
+    }
+
     const playLevelUpSound = () => {
         // レベルアップ効果音のURL（DQ風のフリー音源などを想定）
         // 一旦ブラウザで再生可能なサンプル音源を設定しますが、必要に応じて差し替え可能です。
@@ -832,13 +865,55 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
     // ボトルネック（緊急）は priority: 'boss' かつ status: 'blocked' か status: 'progress' 的なものを想定
     const bottleneckTasks = activeTasks.filter((t: any) => t.priority === 'boss')
 
-    // 🌟 パーティメンバー（過去のユニークな担当者名 + 自分自身）の抽出
+    // 🌟 タスク担当ドロップダウン用のメンバー名
     const partyMembers = useMemo(() => {
+        if (activeTab !== 'all') {
+            const names = projectMembers
+                .map((m: any) => userProfiles[m.user_id]?.display_name)
+                .filter(Boolean) as string[]
+
+            const currentUserName = displayName || user.email?.split('@')[0] || '勇者'
+            if (projectMembers.some((m: any) => m.user_id === user.id)) {
+                names.push(currentUserName)
+            }
+            return Array.from(new Set(names)).sort()
+        }
+
         const namesFromTasks = tasks.flatMap((t: any) => (t.assignee_name || '').split(/[,、\s]+/).filter(Boolean));
         const currentUser = displayName || user.email?.split('@')[0] || '勇者';
-        // 自分自身と、実際にタスクに存在する担当者名だけに絞る
         return Array.from(new Set([currentUser, ...namesFromTasks])).sort();
-    }, [tasks, user.email, displayName]);
+    }, [activeTab, projectMembers, userProfiles, displayName, user.email, user.id, tasks]);
+
+    const partyRoster = useMemo(() => {
+        const roleOrder: Record<string, number> = { owner: 0, admin: 1, member: 2 }
+
+        if (activeTab === 'all') {
+            return partyMembers.map((name) => ({
+                user_id: name,
+                display_name: name,
+                avatar_url: getFallbackAvatar(name),
+                role: 'member'
+            }))
+        }
+
+        return projectMembers
+            .map((m: any) => {
+                const profile = userProfiles[m.user_id]
+                const fallbackName = m.user_id === user.id ? (displayName || user.email?.split('@')[0] || '冒険者') : '冒険者'
+                const displayNameResolved = profile?.display_name || fallbackName
+                return {
+                    user_id: m.user_id,
+                    display_name: displayNameResolved,
+                    avatar_url: profile?.avatar_url || getFallbackAvatar(displayNameResolved),
+                    role: m.role || 'member'
+                }
+            })
+            .sort((a, b) => {
+                const roleDiff = (roleOrder[a.role] ?? 99) - (roleOrder[b.role] ?? 99)
+                if (roleDiff !== 0) return roleDiff
+                return a.display_name.localeCompare(b.display_name, 'ja')
+            })
+    }, [activeTab, projectMembers, userProfiles, user.id, user.email, displayName, partyMembers])
 
     return (
         <main className="py-12 min-h-screen relative max-w-4xl mx-auto px-4">
@@ -1128,20 +1203,39 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                     {/* 👥 パーティ名簿 */}
                     <div className="retro-window">
                         <h3 className="text-gray-400 mb-3 text-lg border-b border-gray-600 pb-1">👥 パーティ名簿</h3>
-                        {partyMembers.length === 0 ? (
+                        {partyRoster.length === 0 ? (
                             <div className="text-sm text-gray-500">まだ誰もいません</div>
                         ) : (
-                            <div className="flex flex-wrap gap-2">
-                                {partyMembers.map((name, i) => (
-                                    <div key={i} className="flex items-center gap-2 bg-gray-900 border border-gray-700 p-1 px-2 rounded-sm cursor-help" title="タスク担当者として登録済みのメンバー">
+                            <div className="flex flex-col gap-2">
+                                {partyRoster.map((member: any) => {
+                                    const canEdit = canEditMemberRole(member.user_id, member.role)
+                                    const roleLabel = member.role === 'owner' ? 'オーナー' : member.role === 'admin' ? '軍師' : 'メンバー'
+                                    return (
+                                    <div key={member.user_id} className="flex items-center gap-2 bg-gray-900 border border-gray-700 p-1 px-2 rounded-sm">
                                         <img 
-                                            src={getFallbackAvatar(name as string)} 
-                                            alt={name as string} 
+                                            src={member.avatar_url} 
+                                            alt={member.display_name} 
                                             className="w-5 h-5 pixelated-avatar border border-black object-cover" 
                                         />
-                                        <span className="text-sm text-gray-300">{name as string}</span>
+                                        <span className="text-sm text-gray-300 flex-1 truncate">{member.display_name}</span>
+                                        <span className="text-[10px] text-gray-400 border border-gray-600 px-1.5 py-0.5 rounded">{roleLabel}</span>
+                                        {activeTab !== 'all' && isManager && (
+                                            canEdit ? (
+                                                <select
+                                                    value={member.role}
+                                                    disabled={changingRoleUserId === member.user_id}
+                                                    onChange={(e) => updateMemberRole(member.user_id, e.target.value)}
+                                                    className="bg-black border border-gray-600 text-[10px] text-gray-300 p-1 cursor-pointer"
+                                                >
+                                                    <option value="member">メンバー</option>
+                                                    <option value="admin">軍師</option>
+                                                </select>
+                                            ) : (
+                                                <span className="text-[10px] text-gray-600">{member.user_id === user.id ? '自分' : '固定'}</span>
+                                            )
+                                        )}
                                     </div>
-                                ))}
+                                )})}
                             </div>
                         )}
                     </div>
