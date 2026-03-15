@@ -35,6 +35,43 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
     const supabase = createClient()
     const router = useRouter()
 
+    const generateInviteCode = () => {
+        const chars = 'abcdefghijklmnopqrstuvwxyz0123456789'
+        let code = ''
+        for (let i = 0; i < 8; i++) {
+            code += chars[Math.floor(Math.random() * chars.length)]
+        }
+        return code
+    }
+
+    const ensureProjectInviteCode = async (projectId: string, currentInviteCode?: string | null) => {
+        if (currentInviteCode) return currentInviteCode
+
+        for (let i = 0; i < 5; i++) {
+            const code = generateInviteCode()
+            const { error } = await supabase
+                .from('projects')
+                .update({ invite_code: code })
+                .eq('id', projectId)
+                .is('invite_code', null)
+
+            if (!error) {
+                setProjectInviteCode(code)
+                setActiveProject((prev: any) => prev ? { ...prev, invite_code: code } : prev)
+                setProjects((prev: any[]) => prev.map((p: any) => p.id === projectId ? { ...p, invite_code: code } : p))
+                return code
+            }
+
+            // unique制約エラーの場合は再生成して再試行
+            if (error.code !== '23505') {
+                console.error('[JPBQuest] 招待コード発行エラー:', error.message)
+                break
+            }
+        }
+
+        return null
+    }
+
     const handleLogout = async () => {
         await supabase.auth.signOut()
         router.refresh()
@@ -44,7 +81,8 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
     const joinProject = async () => {
         if (!inviteCodeInput) return
         setIsJoining(true)
-        const { error } = await supabase.rpc('join_project_by_code', { target_invite_code: inviteCodeInput })
+        const normalizedCode = inviteCodeInput.trim().toLowerCase()
+        const { error } = await supabase.rpc('join_project_by_code', { target_invite_code: normalizedCode })
         if (error) {
             alert('参加エラー: ' + error.message)
         } else {
@@ -177,10 +215,18 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
             return
         }
 
-        const { data: projData } = await supabase.from('projects').select('*').eq('id', activeTab).maybeSingle()
+        const { data: projData, error: projError } = await supabase.from('projects').select('*').eq('id', activeTab).maybeSingle()
+        if (projError) {
+            console.error('[JPBQuest] プロジェクト取得エラー:', projError.message)
+        }
         if (projData) {
             setActiveProject(projData)
-            setProjectInviteCode(projData.invite_code)
+            if (projData.invite_code) {
+                setProjectInviteCode(projData.invite_code)
+            } else {
+                const generatedCode = await ensureProjectInviteCode(activeTab, projData.invite_code)
+                setProjectInviteCode(generatedCode)
+            }
         }
 
         const { data } = await supabase
@@ -504,10 +550,11 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
         // RLS prevents us from selecting a project immediately after insert because 
         // the project_members row doesn't exist yet. So we generate the ID client-side.
         const newProjectId = crypto.randomUUID();
+        const inviteCode = generateInviteCode();
 
         const { error } = await supabase
             .from('projects')
-            .insert({ id: newProjectId, name: newProjectName })
+            .insert({ id: newProjectId, name: newProjectName, invite_code: inviteCode })
 
         if (!error) {
             // Insert membership so RLS allows viewing
@@ -520,7 +567,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
             if (memError) {
                 alert('メンバー追加エラー: ' + memError.message)
             } else {
-                setProjects([...projects, { id: newProjectId, name: newProjectName }])
+                setProjects([...projects, { id: newProjectId, name: newProjectName, invite_code: inviteCode }])
                 setNewProjectName('')
                 router.refresh()
             }
@@ -916,7 +963,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                             <div>
                                                 <div className="text-[10px] text-yellow-500/70 uppercase tracking-[0.2em] font-bold mb-1">Secret Invite Spell (招待の呪文)</div>
                                                 <div className="text-xl text-yellow-400 font-mono font-bold select-all tracking-wider shadow-yellow-500/20 drop-shadow-sm">
-                                                    {activeProject?.invite_code || projectInviteCode || 'LOADING...'}
+                                                    {activeProject?.invite_code || projectInviteCode || '未発行'}
                                                 </div>
                                             </div>
                                         </div>
