@@ -568,7 +568,13 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                                     ?
                                                 </div>
                                             ) : (
-                                                <img src={getAssigneeAvatar(task.assignee_id, task.assignee_name)} className="w-7 h-7 md:w-7 md:h-7 pixelated-avatar border border-black shadow-sm object-cover" />
+                                                <div className="w-7 h-7 md:w-7 md:h-7 border border-black shadow-sm overflow-hidden">
+                                                    <img
+                                                        src={getAssigneeAvatar(task.assignee_id, task.assignee_name)}
+                                                        className="w-full h-full pixelated-avatar-tiny object-cover"
+                                                        style={{ transform: 'scale(1.22)' }}
+                                                    />
+                                                </div>
                                             )}
                                         </div>
                                         <select
@@ -590,7 +596,13 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                                     ?
                                                 </div>
                                             ) : (
-                                                <img src={getAssigneeAvatar(task.assignee_id, task.assignee_name)} className="w-7 h-7 md:w-7 md:h-7 pixelated-avatar border border-black object-cover" />
+                                                <div className="w-7 h-7 md:w-7 md:h-7 border border-black overflow-hidden">
+                                                    <img
+                                                        src={getAssigneeAvatar(task.assignee_id, task.assignee_name)}
+                                                        className="w-full h-full pixelated-avatar-tiny object-cover"
+                                                        style={{ transform: 'scale(1.22)' }}
+                                                    />
+                                                </div>
                                             )}
                                         </div>
                                         <span className="text-[9px] md:text-[9px] text-center text-gray-400 truncate w-full">
@@ -1889,7 +1901,15 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                                                     {isUnassigned ? (
                                                                         <div className="w-6 h-6 flex items-center justify-center border border-gray-600 bg-[#1a1a1a] text-gray-300 text-sm font-bold leading-none">?</div>
                                                                     ) : (
-                                                                        <img src={avatar} alt={name} className="w-6 h-6 pixelated-avatar grayscale border border-gray-800 object-cover" title={name} />
+                                                                        <div className="w-6 h-6 border border-gray-800 overflow-hidden">
+                                                                            <img
+                                                                                src={avatar}
+                                                                                alt={name}
+                                                                                className="w-full h-full pixelated-avatar-tiny grayscale object-cover"
+                                                                                style={{ transform: 'scale(1.22)' }}
+                                                                                title={name}
+                                                                            />
+                                                                        </div>
                                                                     )}
                                                                     <span className="text-[9px] text-gray-700 truncate w-full text-center">
                                                                         {isUnassigned ? '未アサイン' : name}
