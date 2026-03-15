@@ -20,6 +20,8 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
     const [newComment, setNewComment] = useState('')
     const [newCommentImageUrl, setNewCommentImageUrl] = useState<string | null>(null)
     const [zoomImageUrl, setZoomImageUrl] = useState<string | null>(null)
+    const [editingCommentId, setEditingCommentId] = useState<string | null>(null)
+    const [editCommentText, setEditCommentText] = useState('')
     const [newTaskPriority, setNewTaskPriority] = useState('normal') // normal, elite, boss
     const [userRole, setUserRole] = useState<string | null>(null) // 'owner', 'admin', 'member'
     const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
@@ -287,6 +289,14 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
         return cleaned.replace(/\n{3,}/g, '\n\n').trim()
     }
 
+    const canDeleteComment = (comment: any) => {
+        return comment.user_id === user.id || isManager
+    }
+
+    const canEditComment = (comment: any) => {
+        return comment.user_id === user.id
+    }
+
     const renderTaskItem = (task: any, index: number) => {
         const isProgress = task.status === 'progress';
         const assignees = (task.assignee_name || '担当未定').split(/[,、\s]+/).filter(Boolean).slice(0, 5);
@@ -427,6 +437,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                     ) : (
                                         comments.map((comment: any) => {
                                             const profile = getProfile(comment.user_id)
+                                            const isEditing = editingCommentId === comment.id
                                             return (
                                                 <div key={comment.id} className="flex gap-3 mb-2">
                                                     <img 
@@ -440,14 +451,66 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                                             <span className="text-[10px] text-[var(--active-color)] uppercase tracking-widest font-bold">
                                                                 {profile.display_name}
                                                             </span>
-                                                            <span className="text-[8px] text-gray-500">
-                                                                {new Date(comment.created_at).toLocaleString('ja-JP')}
-                                                            </span>
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="text-[8px] text-gray-500">
+                                                                    {new Date(comment.created_at).toLocaleString('ja-JP')}
+                                                                </span>
+                                                                {canEditComment(comment) && (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => {
+                                                                            setEditingCommentId(comment.id)
+                                                                            setEditCommentText(cleanCommentContent(comment.content, comment.image_url))
+                                                                        }}
+                                                                        className="text-[10px] text-gray-400 hover:text-yellow-300"
+                                                                    >
+                                                                        編集
+                                                                    </button>
+                                                                )}
+                                                                {canDeleteComment(comment) && (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => deleteComment(comment.id)}
+                                                                        className="text-[10px] text-gray-500 hover:text-red-400"
+                                                                    >
+                                                                        削除
+                                                                    </button>
+                                                                )}
+                                                            </div>
                                                         </div>
-                                                        {cleanCommentContent(comment.content, comment.image_url) && (
+                                                        {!isEditing && cleanCommentContent(comment.content, comment.image_url) && (
                                                             <p className="text-sm leading-relaxed text-gray-200 whitespace-pre-wrap mb-2">
                                                                 {cleanCommentContent(comment.content, comment.image_url)}
                                                             </p>
+                                                        )}
+                                                        {isEditing && (
+                                                            <div className="mb-2">
+                                                                <textarea
+                                                                    value={editCommentText}
+                                                                    onChange={(e) => setEditCommentText(e.target.value)}
+                                                                    rows={3}
+                                                                    className="w-full bg-black border border-[#666] p-2 text-white text-sm outline-none"
+                                                                />
+                                                                <div className="flex justify-end gap-2 mt-2">
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => {
+                                                                            setEditingCommentId(null)
+                                                                            setEditCommentText('')
+                                                                        }}
+                                                                        className="text-xs px-3 py-1 border border-gray-600 text-gray-400 hover:text-white"
+                                                                    >
+                                                                        キャンセル
+                                                                    </button>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => saveEditedComment(comment.id)}
+                                                                        className="text-xs px-3 py-1 border border-yellow-500 text-yellow-300 hover:bg-yellow-500 hover:text-black"
+                                                                    >
+                                                                        保存
+                                                                    </button>
+                                                                </div>
+                                                            </div>
                                                         )}
                                                         
                                                         {/* 🖼️ 画像表示 */}
@@ -491,7 +554,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
 
                                 <form onSubmit={(e) => submitComment(e, task.id)} className="flex flex-col gap-2 mt-2 px-2">
                                     <div className="flex items-center gap-2 mb-1">
-                                        <label className="cursor-pointer flex items-center gap-1 text-[10px] text-gray-400 hover:text-[var(--active-color)] bg-[#1a1a1a] px-2 py-1 rounded border border-[#333]">
+                                        <label className="cursor-pointer flex items-center gap-1 text-[10px] text-yellow-300 hover:text-yellow-200 bg-[#2b2300] px-2 py-1 rounded border-2 border-yellow-500 shadow-[0_0_0_1px_rgba(255,204,0,0.2)]">
                                             <span>📷 写真を添付</span>
                                             <input 
                                                 type="file" 
@@ -879,6 +942,50 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
             setCommentCounts(prev => ({
                 ...prev,
                 [taskId]: (prev[taskId] || 0) + 1
+            }))
+        }
+    }
+
+    const saveEditedComment = async (commentId: string) => {
+        const updatedContent = editCommentText.trim()
+        if (!updatedContent) {
+            alert('コメント本文は空にできません。')
+            return
+        }
+
+        const { error } = await supabase
+            .from('comments')
+            .update({ content: updatedContent })
+            .eq('id', commentId)
+
+        if (error) {
+            alert('編集エラー: ' + error.message)
+            return
+        }
+
+        setComments((prev) => prev.map((c: any) => (
+            c.id === commentId ? { ...c, content: updatedContent } : c
+        )))
+        setEditingCommentId(null)
+        setEditCommentText('')
+    }
+
+    const deleteComment = async (commentId: string) => {
+        if (!confirm('このコメントを削除しますか？')) return
+
+        const targetComment = comments.find((c: any) => c.id === commentId)
+        const { error } = await supabase.from('comments').delete().eq('id', commentId)
+
+        if (error) {
+            alert('削除エラー: ' + error.message)
+            return
+        }
+
+        setComments((prev) => prev.filter((c: any) => c.id !== commentId))
+        if (expandedTaskId && targetComment?.task_id) {
+            setCommentCounts(prev => ({
+                ...prev,
+                [targetComment.task_id]: Math.max((prev[targetComment.task_id] || 1) - 1, 0)
             }))
         }
     }
