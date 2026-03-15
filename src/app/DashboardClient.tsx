@@ -24,6 +24,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
     const [editCommentText, setEditCommentText] = useState('')
     const [editingTaskId, setEditingTaskId] = useState<string | null>(null)
     const [editTaskTitle, setEditTaskTitle] = useState('')
+    const [editTaskDueDate, setEditTaskDueDate] = useState('')
     const [newTaskPriority, setNewTaskPriority] = useState('normal') // normal, elite, boss
     const [newTaskDueDate, setNewTaskDueDate] = useState('')
     const [userRole, setUserRole] = useState<string | null>(null) // 'owner', 'admin', 'member'
@@ -349,11 +350,13 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
     const beginTaskTitleEdit = (task: any) => {
         setEditingTaskId(task.id)
         setEditTaskTitle(task.title || '')
+        setEditTaskDueDate(formatDateTimeForInput(task.due_date))
     }
 
     const cancelTaskTitleEdit = () => {
         setEditingTaskId(null)
         setEditTaskTitle('')
+        setEditTaskDueDate('')
     }
 
     const closeExpandedComments = () => {
@@ -382,6 +385,19 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
         }, 300)
     }
 
+    const formatDateTimeForInput = (value?: string | null) => {
+        if (!value) return ''
+        const date = new Date(value)
+        if (Number.isNaN(date.getTime())) return ''
+        const pad = (n: number) => String(n).padStart(2, '0')
+        const yyyy = date.getFullYear()
+        const mm = pad(date.getMonth() + 1)
+        const dd = pad(date.getDate())
+        const hh = pad(date.getHours())
+        const mi = pad(date.getMinutes())
+        return `${yyyy}-${mm}-${dd}T${hh}:${mi}`
+    }
+
     const saveTaskTitle = async (taskId: string) => {
         const trimmedTitle = editTaskTitle.trim()
         if (!trimmedTitle) {
@@ -389,18 +405,28 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
             return
         }
 
+        let dueDateIso: string | null = null
+        if (editTaskDueDate) {
+            const parsed = new Date(editTaskDueDate)
+            if (Number.isNaN(parsed.getTime())) {
+                alert('期限日時の形式が不正です。')
+                return
+            }
+            dueDateIso = parsed.toISOString()
+        }
+
         const { error } = await supabase
             .from('tasks')
-            .update({ title: trimmedTitle })
+            .update({ title: trimmedTitle, due_date: dueDateIso })
             .eq('id', taskId)
 
         if (error) {
-            alert('タスク名の更新エラー: ' + error.message)
+            alert('タスク更新エラー: ' + error.message)
             return
         }
 
         setTasks((prev: any[]) => prev.map((task: any) => (
-            task.id === taskId ? { ...task, title: trimmedTitle } : task
+            task.id === taskId ? { ...task, title: trimmedTitle, due_date: dueDateIso } : task
         )))
         cancelTaskTitleEdit()
     }
@@ -456,7 +482,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
 
                             <div className="grow text-sm md:text-base flex items-center flex-wrap gap-1.5 md:gap-2.5 min-w-0">
                                 {isEditingTaskTitle ? (
-                                    <div className="flex items-center gap-2 mr-1 md:mr-1.5 min-w-[200px] md:min-w-[240px] flex-1">
+                                    <div className="flex items-center flex-wrap gap-1.5 md:gap-2 mr-1 md:mr-1.5 min-w-[200px] md:min-w-[240px] flex-1">
                                         <input
                                             type="text"
                                             value={editTaskTitle}
@@ -473,6 +499,21 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                             autoFocus
                                             className="min-w-0 flex-1 bg-[#1a1200] border-2 border-[var(--active-color)] px-2 py-1.5 md:px-2.5 md:py-1.5 text-sm md:text-sm text-white outline-none shadow-[0_0_0_1px_rgba(255,204,0,0.2)]"
                                         />
+                                        <input
+                                            type="datetime-local"
+                                            value={editTaskDueDate}
+                                            onChange={(e) => setEditTaskDueDate(e.target.value)}
+                                            className="bg-black border border-gray-500 px-2 py-1.5 md:px-2.5 md:py-1.5 text-[10px] md:text-[10px] text-gray-200 outline-none"
+                                            style={{ colorScheme: 'dark' }}
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={() => setEditTaskDueDate('')}
+                                            className="shrink-0 px-2 py-1.5 md:px-2.5 md:py-1.5 text-[10px] md:text-[10px] font-bold border border-gray-700 text-gray-300 hover:border-gray-500 hover:text-white"
+                                            title="期限をクリア"
+                                        >
+                                            期限なし
+                                        </button>
                                         <button
                                             type="button"
                                             onClick={() => saveTaskTitle(task.id)}
@@ -532,11 +573,11 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                             type="button"
                                             onClick={() => beginTaskTitleEdit(task)}
                                             className="inline-flex items-center gap-1 rounded-sm px-1.5 md:px-2 py-1 text-[9px] md:text-[10px] font-bold border border-[#9d7b3b] bg-[#231b0c] text-[#f2d78f] hover:bg-[#2e2411] transition-colors whitespace-nowrap"
-                                            title="タスク名を編集"
+                                            title="タスク名・期限を編集"
                                         >
                                             <span>✎</span>
-                                            <span className="md:hidden">題名</span>
-                                            <span className="hidden md:inline">題名変更</span>
+                                            <span className="md:hidden">編集</span>
+                                            <span className="hidden md:inline">題名・期限</span>
                                         </button>
                                     )}
                                     <button
@@ -1845,7 +1886,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                                      <div className="grow text-sm md:text-lg text-gray-500 line-through flex items-center flex-wrap gap-1.5 md:gap-2 min-w-0">
                                                         {isEditingTaskTitle ? (
                                                             <div
-                                                                className="flex items-center gap-2 min-w-[280px] flex-1"
+                                                                className="flex items-center flex-wrap gap-2 min-w-[280px] flex-1"
                                                                 style={{ textDecoration: 'none' }}
                                                             >
                                                                 <input
@@ -1864,6 +1905,21 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                                                     autoFocus
                                                                     className="min-w-0 flex-1 bg-[#1a1200] border border-[var(--active-color)] px-3 py-2 text-white outline-none"
                                                                 />
+                                                                <input
+                                                                    type="datetime-local"
+                                                                    value={editTaskDueDate}
+                                                                    onChange={(e) => setEditTaskDueDate(e.target.value)}
+                                                                    className="bg-black border border-gray-500 px-3 py-2 text-xs text-gray-200 outline-none"
+                                                                    style={{ colorScheme: 'dark' }}
+                                                                />
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => setEditTaskDueDate('')}
+                                                                    className="shrink-0 px-3 py-2 text-xs font-bold border border-gray-700 text-gray-300 hover:border-gray-500 hover:text-white"
+                                                                    style={{ textDecoration: 'none' }}
+                                                                >
+                                                                    期限なし
+                                                                </button>
                                                                 <button
                                                                     type="button"
                                                                     onClick={() => saveTaskTitle(task.id)}
@@ -1894,7 +1950,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                                                     style={{ textDecoration: 'none' }}
                                                                 >
                                                                     <span>✎</span>
-                                                                    <span>題名変更</span>
+                                                                    <span>題名・期限</span>
                                                                 </button>
                                                             </>
                                                         )}
