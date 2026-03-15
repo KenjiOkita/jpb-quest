@@ -33,13 +33,16 @@ function SubmitButton({ label, loadingLabel, isPrimary = true }: { label: string
 
 export default function LoginPage() {
     return (
-        <div className="min-h-screen flex items-center justify-center relative z-[9999] pointer-events-auto bg-black overflow-hidden">
+        <div className="min-h-screen flex items-center justify-center relative pointer-events-auto overflow-hidden">
+            {/* 背景の遮断レイヤー（背景画像を見せつつ文字を読みやすくする） */}
+            <div className="fixed inset-0 bg-black/40 z-0"></div>
+
             {/* フォームコンテナ */}
-            <div className="retro-window max-w-md w-full relative z-[10000] bg-black p-8 shadow-2xl border-4 border-white mx-4">
+            <div className="retro-window max-w-md w-full relative z-10 bg-black p-8 shadow-[0_0_50px_rgba(0,0,0,0.8)] border-4 border-white mx-4 my-8">
                 <h1 className="retro-title text-center text-3xl mb-6">JPB クエスト</h1>
                 <p className="text-center mb-6 text-gray-300 font-bold">ギルドへのログイン（冒険者認証）</p>
 
-                <form className="flex flex-col gap-4 relative z-[10001]">
+                <form className="flex flex-col gap-4 relative z-20">
                     <div className="flex flex-col gap-1">
                         <label htmlFor="email" className="text-sm">📧 魔法のメールアドレス</label>
                         <input
@@ -65,18 +68,22 @@ export default function LoginPage() {
                         <a href="/reset-password" params-recovery="true" className="text-[10px] text-gray-500 hover:text-white underline mt-1 text-right">パスワードを忘れた（教会の祈り）</a>
                     </div>
 
-                    <SubmitButton label="ログイン（冒険を再開する）" loadingLabel="詠唱中..." />
+                    <div className="mt-4 flex flex-col gap-6">
+                        <SubmitButton label="ログイン（冒険を再開する）" loadingLabel="詠唱中..." />
 
-                    <div className="text-center mt-6 text-sm text-gray-400">
-                        --- まだ冒険者登録をしていない場合 ---
+                        <div className="relative py-2">
+                            <div className="absolute inset-0 flex items-center">
+                                <span className="w-full border-t border-gray-700"></span>
+                            </div>
+                            <div className="relative flex justify-center text-xs uppercase">
+                                <span className="bg-black px-2 text-gray-500">はじめての方はこちら</span>
+                            </div>
+                        </div>
+
+                        <SubmitButton label="新規登録（ギルドに加入する）" loadingLabel="登録中..." isPrimary={false} />
                     </div>
-
-                    <SubmitButton label="新規登録（ギルドに加入する）" loadingLabel="登録中..." isPrimary={false} />
                 </form>
             </div>
-            
-            {/* 背景の遮断レイヤーを明示的に背面に送る */}
-            <div className="fixed inset-0 bg-black/60 -z-10 pointer-events-none"></div>
         </div>
     )
 }
