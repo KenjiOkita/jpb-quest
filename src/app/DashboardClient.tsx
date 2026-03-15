@@ -512,41 +512,44 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                     </select>
                                 </div>
                                 {activeTab === 'all' && <span className="text-xs md:text-sm ml-1 md:ml-2 bg-gray-800 px-1.5 md:px-2 py-0.5 rounded text-gray-300">({projects.find((p: any) => p.id === task.project_id)?.name})</span>}
-                                {!isEditingTaskTitle && (
+                                <div className="ml-auto shrink-0 flex items-center gap-1.5">
+                                    {!isEditingTaskTitle && (
+                                        <button
+                                            type="button"
+                                            onClick={() => beginTaskTitleEdit(task)}
+                                            className="inline-flex items-center gap-1 rounded-sm px-1.5 md:px-2 py-1 text-[9px] md:text-[10px] font-bold border border-[#9d7b3b] bg-[#231b0c] text-[#f2d78f] hover:bg-[#2e2411] transition-colors whitespace-nowrap"
+                                            title="タスク名を編集"
+                                        >
+                                            <span>✎</span>
+                                            <span className="md:hidden">題名</span>
+                                            <span className="hidden md:inline">題名変更</span>
+                                        </button>
+                                    )}
                                     <button
                                         type="button"
-                                        onClick={() => beginTaskTitleEdit(task)}
-                                        className="ml-auto inline-flex items-center gap-1 rounded-sm px-1.5 md:px-2 py-1 text-[9px] md:text-[10px] font-bold border border-[#9d7b3b] bg-[#231b0c] text-[#f2d78f] hover:bg-[#2e2411] transition-colors"
-                                        title="タスク名を編集"
+                                        data-comment-trigger="true"
+                                        className="text-[10px] md:text-[11px] text-gray-200 bg-[#221400] border border-yellow-700 cursor-pointer inline-flex items-center gap-1 px-2 md:px-2 py-1 md:py-1 shadow-[0_0_10px_rgba(234,179,8,0.18)] hover:bg-[#3a2400] transition-colors whitespace-nowrap"
+                                        onClick={() => toggleTaskExpansion(task.id)}
+                                        title="作戦会議"
                                     >
-                                        <span>✎</span>
-                                        <span>題名変更</span>
+                                        <span>💬</span>
+                                        <span>コメント</span>
+                                        {commentCounts[task.id] > 0 && (
+                                            <span className="bg-yellow-400 text-black px-1.5 rounded min-w-[1.6em] text-center font-bold border border-yellow-200">
+                                                {commentCounts[task.id]}
+                                            </span>
+                                        )}
                                     </button>
-                                )}
-                                <button
-                                    type="button"
-                                    data-comment-trigger="true"
-                                    className="text-[10px] md:text-[11px] text-gray-200 bg-[#221400] border border-yellow-700 cursor-pointer flex items-center gap-1 px-2 md:px-2 py-1 md:py-1 shadow-[0_0_10px_rgba(234,179,8,0.18)] hover:bg-[#3a2400] transition-colors"
-                                    onClick={() => toggleTaskExpansion(task.id)}
-                                    title="作戦会議"
-                                >
-                                    <span>💬</span>
-                                    <span>コメント</span>
-                                    {commentCounts[task.id] > 0 && (
-                                        <span className="bg-yellow-400 text-black px-1.5 rounded min-w-[1.6em] text-center font-bold border border-yellow-200">
-                                            {commentCounts[task.id]}
-                                        </span>
+                                    {isOwner && (
+                                        <button
+                                            className="text-gray-700 hover:text-red-500 text-xs p-1 border border-transparent hover:border-red-900 transition-colors"
+                                            onClick={(e) => { e.stopPropagation(); deleteTask(task.id); }}
+                                            title="クエストを破棄（大魔王のみ）"
+                                        >
+                                            🗑️
+                                        </button>
                                     )}
-                                </button>
-                                {isOwner && (
-                                    <button
-                                        className="text-gray-700 hover:text-red-500 text-xs p-1 border border-transparent hover:border-red-900 transition-colors"
-                                        onClick={(e) => { e.stopPropagation(); deleteTask(task.id); }}
-                                        title="クエストを破棄（大魔王のみ）"
-                                    >
-                                        🗑️
-                                    </button>
-                                )}
+                                </div>
                             </div>
 
                                 <div className="flex flex-col items-center w-[64px] md:w-[72px] shrink-0 border-l border-white/10 ml-1 md:ml-3 pl-2 md:pl-3 pt-0.5 md:pt-0">
