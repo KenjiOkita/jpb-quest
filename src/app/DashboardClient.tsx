@@ -428,21 +428,21 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                         {...provided.draggableProps}
                         className={`bg-black transition-all ${priorityClasses} ${isOverdue ? 'animate-pulse border-red-600 shadow-[0_0_20px_rgba(255,0,0,0.4)]' : ''}`}
                     >
-                        <div className={`flex items-center p-5 gap-4 transition-colors hover:bg-[#111]
+                        <div className={`flex items-start md:items-center p-2.5 md:p-5 gap-2 md:gap-4 transition-colors hover:bg-[#111]
                  ${isProgress ? 'border-l-8 border-l-[var(--progress-color)] bg-[rgba(255,68,68,0.05)] text-white' : 'text-[var(--muted-color)]'}
                  ${isOverdue ? 'bg-red-950/20' : isNearDeadline ? 'bg-orange-950/10' : ''}`}>
 
-                            <div {...provided.dragHandleProps} className="text-yellow-400 hover:text-yellow-200 cursor-grab active:cursor-grabbing px-2 text-4xl select-none leading-none hover:scale-110 transition-all">
+                            <div {...provided.dragHandleProps} className="text-yellow-400 hover:text-yellow-200 cursor-grab active:cursor-grabbing px-1 md:px-2 text-2xl md:text-4xl select-none leading-none hover:scale-110 transition-all mt-0.5 md:mt-0">
                                 ⠿
                             </div>
 
                             <div className="relative shrink-0 flex items-center">
-                                <input type="checkbox" checked={false} onChange={(e) => markCompleted(task, e.target.checked)} className={`appearance-none w-6 h-6 border-2 bg-black cursor-pointer align-middle ${isProgress ? 'border-white' : 'border-[var(--muted-color)]'}`} />
+                                <input type="checkbox" checked={false} onChange={(e) => markCompleted(task, e.target.checked)} className={`appearance-none w-5 h-5 md:w-6 md:h-6 border-2 bg-black cursor-pointer align-middle ${isProgress ? 'border-white' : 'border-[var(--muted-color)]'}`} />
                             </div>
 
-                            <div className="grow text-lg flex items-center flex-wrap gap-4">
+                            <div className="grow text-base md:text-lg flex items-center flex-wrap gap-2 md:gap-4 min-w-0">
                                 {isEditingTaskTitle ? (
-                                    <div className="flex items-center gap-2 mr-2 min-w-[280px] flex-1">
+                                    <div className="flex items-center gap-2 mr-1 md:mr-2 min-w-[200px] md:min-w-[280px] flex-1">
                                         <input
                                             type="text"
                                             value={editTaskTitle}
@@ -457,28 +457,28 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                                 }
                                             }}
                                             autoFocus
-                                            className="min-w-0 flex-1 bg-[#1a1200] border-2 border-[var(--active-color)] px-3 py-2 text-white outline-none shadow-[0_0_0_1px_rgba(255,204,0,0.2)]"
+                                            className="min-w-0 flex-1 bg-[#1a1200] border-2 border-[var(--active-color)] px-2 py-1.5 md:px-3 md:py-2 text-sm md:text-base text-white outline-none shadow-[0_0_0_1px_rgba(255,204,0,0.2)]"
                                         />
                                         <button
                                             type="button"
                                             onClick={() => saveTaskTitle(task.id)}
-                                            className="shrink-0 px-3 py-2 text-xs font-bold bg-[var(--active-color)] text-black border border-yellow-200 hover:brightness-110"
+                                            className="shrink-0 px-2 py-1.5 md:px-3 md:py-2 text-[10px] md:text-xs font-bold bg-[var(--active-color)] text-black border border-yellow-200 hover:brightness-110"
                                         >
                                             保存
                                         </button>
                                         <button
                                             type="button"
                                             onClick={cancelTaskTitleEdit}
-                                            className="shrink-0 px-3 py-2 text-xs font-bold border border-gray-600 text-gray-300 hover:border-gray-400 hover:text-white"
+                                            className="shrink-0 px-2 py-1.5 md:px-3 md:py-2 text-[10px] md:text-xs font-bold border border-gray-600 text-gray-300 hover:border-gray-400 hover:text-white"
                                         >
                                             戻す
                                         </button>
                                     </div>
                                 ) : (
-                                    <div className="flex items-center mr-2 min-w-0">
+                                    <div className="flex items-center mr-1 md:mr-2 min-w-0">
                                         <span
-                                            className={`cursor-pointer hover:underline decoration-[var(--active-color)] underline-offset-4 
-                                                ${isBoss ? 'text-[#ff4444] font-bold text-2xl tracking-tighter' : isElite ? 'text-[#ffaa00] font-bold text-xl' : ''}`}
+                                            className={`cursor-pointer hover:underline decoration-[var(--active-color)] underline-offset-4 break-words
+                                                ${isBoss ? 'text-[#ff4444] font-bold text-lg md:text-2xl tracking-tight md:tracking-tighter' : isElite ? 'text-[#ffaa00] font-bold text-base md:text-xl' : ''}`}
                                             onClick={closeExpandedComments}
                                             title="開いている作戦会議を閉じる"
                                         >
@@ -486,9 +486,9 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                         </span>
                                     </div>
                                 )}
-                                <div className="flex gap-3 items-center">
+                                <div className="flex gap-1.5 md:gap-3 items-center flex-wrap">
                                     {dueDate && (
-                                        <div className={`text-[10px] px-2 py-0.5 border font-bold flex items-center gap-1
+                                        <div className={`text-[9px] md:text-[10px] px-1.5 md:px-2 py-0.5 border font-bold flex items-center gap-1
                                             ${isOverdue ? 'border-red-500 text-red-500 animate-bounce' : isNearDeadline ? 'border-orange-500 text-orange-500' : 'border-gray-600 text-gray-500'}`}>
                                             {isOverdue ? '💀 逃走中 (OVERDUE)' : isNearDeadline ? '⏳ 逃走間近 (NEAR)' : '📅 期限'}
                                             : {dueDate.toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
@@ -496,27 +496,27 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                     )}
                                     <div className="cursor-pointer select-none" onClick={() => toggleProgress(task)} title="クリックで進行状態を変更">
                                         {isProgress ? (
-                                            <span className="text-sm px-1.5 py-0.5 border border-[var(--progress-color)] text-[var(--progress-color)] rounded inline-flex items-center gap-1 hover:bg-[var(--progress-color)] hover:text-black transition-colors">⚔️ 冒険中</span>
+                                            <span className="text-xs md:text-sm px-1 md:px-1.5 py-0.5 border border-[var(--progress-color)] text-[var(--progress-color)] rounded inline-flex items-center gap-1 hover:bg-[var(--progress-color)] hover:text-black transition-colors">⚔️ 冒険中</span>
                                         ) : (
-                                            <span className="text-sm px-1.5 py-0.5 border border-[var(--muted-color)] text-[var(--muted-color)] rounded inline-flex items-center gap-1 hover:border-[var(--muted-color)] hover:text-white transition-colors">📜 受注待ち</span>
+                                            <span className="text-xs md:text-sm px-1 md:px-1.5 py-0.5 border border-[var(--muted-color)] text-[var(--muted-color)] rounded inline-flex items-center gap-1 hover:border-[var(--muted-color)] hover:text-white transition-colors">📜 受注待ち</span>
                                         )}
                                     </div>
                                     <select
                                         value={task.priority || 'normal'}
                                         onChange={(e) => updateTaskPriority(task, e.target.value)}
-                                        className="bg-transparent border border-[#444] text-[10px] text-gray-500 outline-none hover:border-gray-400 cursor-pointer"
+                                        className="bg-transparent border border-[#444] text-[9px] md:text-[10px] text-gray-500 outline-none hover:border-gray-400 cursor-pointer"
                                     >
                                         <option value="normal">雑魚敵</option>
                                         <option value="elite">中ボス</option>
                                         <option value="boss">大ボス</option>
                                     </select>
                                 </div>
-                                {activeTab === 'all' && <span className="text-sm ml-2 bg-gray-800 px-2 py-0.5 rounded text-gray-300">({projects.find((p: any) => p.id === task.project_id)?.name})</span>}
+                                {activeTab === 'all' && <span className="text-xs md:text-sm ml-1 md:ml-2 bg-gray-800 px-1.5 md:px-2 py-0.5 rounded text-gray-300">({projects.find((p: any) => p.id === task.project_id)?.name})</span>}
                                 {!isEditingTaskTitle && (
                                     <button
                                         type="button"
                                         onClick={() => beginTaskTitleEdit(task)}
-                                        className="ml-auto inline-flex items-center gap-1 rounded-sm px-2 py-1 text-[10px] font-bold border border-[#9d7b3b] bg-[#231b0c] text-[#f2d78f] hover:bg-[#2e2411] transition-colors"
+                                        className="ml-auto inline-flex items-center gap-1 rounded-sm px-1.5 md:px-2 py-1 text-[9px] md:text-[10px] font-bold border border-[#9d7b3b] bg-[#231b0c] text-[#f2d78f] hover:bg-[#2e2411] transition-colors"
                                         title="タスク名を編集"
                                     >
                                         <span>✎</span>
@@ -526,7 +526,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                 <button
                                     type="button"
                                     data-comment-trigger="true"
-                                    className="text-xs text-gray-200 bg-[#221400] border border-yellow-700 cursor-pointer flex items-center gap-1 px-2.5 py-1.5 shadow-[0_0_10px_rgba(234,179,8,0.18)] hover:bg-[#3a2400] transition-colors"
+                                    className="text-[10px] md:text-xs text-gray-200 bg-[#221400] border border-yellow-700 cursor-pointer flex items-center gap-1 px-2 md:px-2.5 py-1 md:py-1.5 shadow-[0_0_10px_rgba(234,179,8,0.18)] hover:bg-[#3a2400] transition-colors"
                                     onClick={() => toggleTaskExpansion(task.id)}
                                     title="作戦会議"
                                 >
@@ -549,23 +549,23 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                 )}
                             </div>
 
-                                <div className="flex flex-col items-center w-[80px] shrink-0 border-l border-white/10 ml-4 pl-4 pt-1">
+                                <div className="flex flex-col items-center w-[64px] md:w-[80px] shrink-0 border-l border-white/10 ml-1 md:ml-4 pl-2 md:pl-4 pt-0.5 md:pt-1">
                                 <div className="text-[9px] text-gray-500 uppercase tracking-tighter mb-2">担当冒険者</div>
                                 {isManager ? (
                                     <div className="flex flex-col items-center w-full gap-2">
                                         <div className="flex -space-x-1">
                                             {isUnassignedTask(task) ? (
-                                                <div className="w-8 h-8 flex items-center justify-center border border-gray-500 bg-[#1b1b1b] text-gray-300 text-lg font-bold leading-none">
+                                                <div className="w-7 h-7 md:w-8 md:h-8 flex items-center justify-center border border-gray-500 bg-[#1b1b1b] text-gray-300 text-base md:text-lg font-bold leading-none">
                                                     ?
                                                 </div>
                                             ) : (
-                                                <img src={getAssigneeAvatar(task.assignee_id, task.assignee_name)} className="w-8 h-8 pixelated-avatar border border-black shadow-sm object-cover" />
+                                                <img src={getAssigneeAvatar(task.assignee_id, task.assignee_name)} className="w-7 h-7 md:w-8 md:h-8 pixelated-avatar border border-black shadow-sm object-cover" />
                                             )}
                                         </div>
                                         <select
                                             value={task.assignee_name || ''}
                                             onChange={(e) => updateAssignee(task.id, e.target.value)}
-                                            className="bg-black border border-gray-600 text-[10px] text-gray-300 outline-none w-full p-1 cursor-pointer hover:border-[var(--active-color)]"
+                                            className="bg-black border border-gray-600 text-[9px] md:text-[10px] text-gray-300 outline-none w-full p-1 cursor-pointer hover:border-[var(--active-color)]"
                                         >
                                             <option value="">未定</option>
                                             {partyMembers.map((name, i) => (
@@ -577,14 +577,14 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                     <div className="group/assignee flex flex-col items-center w-full">
                                         <div className="flex -space-x-1 mb-1">
                                             {isUnassignedTask(task) ? (
-                                                <div className="w-8 h-8 flex items-center justify-center border border-gray-500 bg-[#1b1b1b] text-gray-300 text-lg font-bold leading-none">
+                                                <div className="w-7 h-7 md:w-8 md:h-8 flex items-center justify-center border border-gray-500 bg-[#1b1b1b] text-gray-300 text-base md:text-lg font-bold leading-none">
                                                     ?
                                                 </div>
                                             ) : (
-                                                <img src={getAssigneeAvatar(task.assignee_id, task.assignee_name)} className="w-8 h-8 pixelated-avatar border border-black object-cover" />
+                                                <img src={getAssigneeAvatar(task.assignee_id, task.assignee_name)} className="w-7 h-7 md:w-8 md:h-8 pixelated-avatar border border-black object-cover" />
                                             )}
                                         </div>
-                                        <span className="text-[10px] text-center text-gray-400 truncate w-full">
+                                        <span className="text-[9px] md:text-[10px] text-center text-gray-400 truncate w-full">
                                             {isUnassignedTask(task) ? '未アサイン' : (task.assignee_id ? (userProfiles[task.assignee_id]?.display_name || task.assignee_name || '担当未定') : (task.assignee_name || '担当未定'))}
                                         </span>
                                     </div>
@@ -594,7 +594,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
 
                         {/* 💬 作戦会議（コメント）エリア展開 */}
                         {expandedTaskId === task.id && (
-                            <div data-comment-panel="true" className="comment-panel-enter bg-[#111] p-4 border-t border-[#333] ml-11 mr-4 mb-4 rounded-sm border-2 border-dashed border-[#555]">
+                            <div data-comment-panel="true" className="comment-panel-enter bg-[#111] p-3 md:p-4 border-t border-[#333] ml-2 md:ml-11 mr-2 md:mr-4 mb-3 md:mb-4 rounded-sm border-2 border-dashed border-[#555]">
                                 <h4 className="text-[var(--active-color)] mb-3 text-sm flex items-center gap-2 font-bold px-2 border-l-4 border-[var(--active-color)]">
                                     <span>💬 作戦会議（指令・報告）</span>
                                 </h4>
@@ -1639,12 +1639,12 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                     const isEditingTaskTitle = editingTaskId === task.id;
                                     return (
                                         <li key={task.id} className="border-b border-gray-800 transition-colors hover:bg-[var(--hover-bg)]">
-                                            <div className="flex items-center p-3 gap-4">
+                                            <div className="flex items-start md:items-center p-2 md:p-3 gap-2 md:gap-4">
                                                 <div className="relative shrink-0 flex items-center">
-                                                    <input type="checkbox" checked={true} onChange={(e) => markCompleted(task, e.target.checked)} className="appearance-none w-6 h-6 border-2 border-gray-600 bg-black cursor-pointer align-middle" />
-                                                    <span className="absolute top-[-4px] left-[2px] text-xl text-gray-400 pointer-events-none">✔</span>
+                                                    <input type="checkbox" checked={true} onChange={(e) => markCompleted(task, e.target.checked)} className="appearance-none w-5 h-5 md:w-6 md:h-6 border-2 border-gray-600 bg-black cursor-pointer align-middle" />
+                                                    <span className="absolute top-[-4px] left-[2px] text-lg md:text-xl text-gray-400 pointer-events-none">✔</span>
                                                 </div>
-                                                 <div className="grow text-lg text-gray-500 line-through flex items-center flex-wrap gap-2">
+                                                 <div className="grow text-sm md:text-lg text-gray-500 line-through flex items-center flex-wrap gap-1.5 md:gap-2 min-w-0">
                                                     {isEditingTaskTitle ? (
                                                         <div
                                                             className="flex items-center gap-2 min-w-[280px] flex-1"
