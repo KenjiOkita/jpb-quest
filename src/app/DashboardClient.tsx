@@ -709,21 +709,22 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                 const newStatus = 'completed';
                 const updateData: any = {
                     status: newStatus,
-                    completed_at: new Date().toISOString()
+                    completed_at: new Date().toISOString(),
+                    completed_by_user_id: user.id
                 }
 
                 const { error } = await supabase.from('tasks').update(updateData).eq('id', task.id)
                 if (!error) {
-                    setTasks(tasks.map((t: any) => t.id === task.id ? { ...t, status: newStatus, completed_at: updateData.completed_at } : t))
+                    setTasks(tasks.map((t: any) => t.id === task.id ? { ...t, status: newStatus, completed_at: updateData.completed_at, completed_by_user_id: user.id } : t))
                 }
                 setIsQuestClearing(false)
             }, 2500)
         } else {
             // 未完了に戻す場合
             const newStatus = 'unstarted';
-            const { error } = await supabase.from('tasks').update({ status: newStatus, completed_at: null }).eq('id', task.id)
+            const { error } = await supabase.from('tasks').update({ status: newStatus, completed_at: null, completed_by_user_id: null }).eq('id', task.id)
             if (!error) {
-                setTasks(tasks.map((t: any) => t.id === task.id ? { ...t, status: newStatus, completed_at: null } : t))
+                setTasks(tasks.map((t: any) => t.id === task.id ? { ...t, status: newStatus, completed_at: null, completed_by_user_id: null } : t))
             }
         }
     }
@@ -926,6 +927,12 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                 return a.display_name.localeCompare(b.display_name, 'ja')
             })
     }, [activeTab, projectMembers, userProfiles, user.id, user.email, displayName, partyMembers])
+
+    const getDisplayNameByUserId = (userId?: string | null) => {
+        if (!userId) return '不明'
+        if (userId === user.id) return displayName || user.email?.split('@')[0] || '冒険者'
+        return userProfiles[userId]?.display_name || '冒険者'
+    }
 
     return (
         <main className="py-12 min-h-screen relative max-w-4xl mx-auto px-4">
@@ -1255,7 +1262,8 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                     {/* アーカイブ */}
                     {completedTasks.length > 0 && (
                         <div className="mt-8 border-t-2 border-dashed border-gray-600 pt-4">
-                            <h3 className="text-gray-500 mb-4 text-lg">🪦 討伐完了（アーカイブ）</h3>
+                            <h3 className="text-gray-500 mb-1 text-lg">🪦 討伐完了（アーカイブ）</h3>
+                            <div className="text-[10px] text-gray-600 mb-4">完了した日時と完了者を記録しています（クリックで作戦会議も表示）。</div>
                             <ul className="list-none p-0 m-0 opacity-50">
                                 {completedTasks.map((task: any) => {
                                     const assignees = (task.assignee_name || '担当未定').split(/[,、\s]+/).filter(Boolean).slice(0, 5);
@@ -1273,7 +1281,14 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                                     >
                                                         {task.title}
                                                     </span>
-                                                    {task.completed_at && <span className="text-xs text-gray-600 no-underline bg-gray-900 px-2 py-1 rounded">討伐日: {new Date(task.completed_at).toLocaleDateString()}</span>}
+                                                    {task.completed_at && (
+                                                        <span className="text-xs text-gray-600 no-underline bg-gray-900 px-2 py-1 rounded">
+                                                            完了: {new Date(task.completed_at).toLocaleString('ja-JP')}
+                                                        </span>
+                                                    )}
+                                                    <span className="text-xs text-gray-600 no-underline bg-gray-900 px-2 py-1 rounded">
+                                                        完了者: {getDisplayNameByUserId(task.completed_by_user_id)}
+                                                    </span>
                                                 </div>
                                                 <div className="flex flex-col items-center gap-1 shrink-0 justify-end w-[80px]">
                                                     {(() => {
