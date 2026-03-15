@@ -39,6 +39,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
     const [isQuestClearing, setIsQuestClearing] = useState(false)
     const [userProfiles, setUserProfiles] = useState<Record<string, { display_name: string, avatar_url: string }>>({})
     const [changingRoleUserId, setChangingRoleUserId] = useState<string | null>(null)
+    const [dragDestination, setDragDestination] = useState<{ droppableId: string, index: number } | null>(null)
 
     const supabase = createClient()
     const router = useRouter()
@@ -396,11 +397,12 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
         cancelTaskTitleEdit()
     }
 
-    const renderTaskItem = (task: any, index: number) => {
+    const renderTaskItem = (task: any, index: number, droppableId: string) => {
         const isProgress = task.status === 'progress';
         const isBoss = task.priority === 'boss';
         const isElite = task.priority === 'elite';
         const isEditingTaskTitle = editingTaskId === task.id;
+        const isDropTarget = dragDestination?.droppableId === droppableId && dragDestination.index === index;
 
         // 期限の状態判定
         const now = new Date();
@@ -421,13 +423,17 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
 
         return (
             <Draggable key={task.id} draggableId={task.id} index={index}>
-                {(provided) => (
+                {(provided, snapshot) => (
                     <li
                         id={`task-${task.id}`}
                         ref={provided.innerRef}
                         {...provided.draggableProps}
-                        className={`bg-black transition-all ${priorityClasses} ${isOverdue ? 'animate-pulse border-red-600 shadow-[0_0_20px_rgba(255,0,0,0.4)]' : ''}`}
+                        className={`bg-black transition-all relative ${priorityClasses} ${isOverdue ? 'animate-pulse border-red-600 shadow-[0_0_20px_rgba(255,0,0,0.4)]' : ''}
+                            ${snapshot.isDragging ? 'ring-2 ring-yellow-400 shadow-[0_0_20px_rgba(250,204,21,0.45)] z-20' : ''}`}
                     >
+                        {isDropTarget && (
+                            <div className="absolute top-0 left-2 right-2 h-[2px] bg-yellow-400 shadow-[0_0_10px_rgba(250,204,21,0.8)] pointer-events-none" />
+                        )}
                         <div className={`flex items-start md:items-center p-2.5 md:py-3 md:px-4 gap-2 md:gap-3 transition-colors hover:bg-[#111]
                  ${isProgress ? 'border-l-8 border-l-[var(--progress-color)] bg-[rgba(255,68,68,0.05)] text-white' : 'text-[var(--muted-color)]'}
                  ${isOverdue ? 'bg-red-950/20' : isNearDeadline ? 'bg-orange-950/10' : ''}`}>
@@ -895,12 +901,53 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
         }
     }
 
+    const onDragUpdate = (update: any) => {
+        if (!update.destination) {
+            setDragDestination(null)
+            return
+        }
+        setDragDestination({
+            droppableId: update.destination.droppableId,
+            index: update.destination.index
+        })
+    }
+
     const onDragEnd = async (result: any) => {
+        setDragDestination(null)
         if (!result.destination) return
 
+        const { source, destination } = result
+
+        // 全体マップではプロジェクト内並べ替えのみ許可（別プロジェクトへの移動は不可）
+        if (activeTab === 'all') {
+            if (source.droppableId !== destination.droppableId) return
+            if (!source.droppableId.startsWith('project-')) return
+
+            const projectId = source.droppableId.replace('project-', '')
+            const projectItems = tasks
+                .filter((t: any) => t.project_id === projectId && t.status !== 'completed')
+                .sort((a: any, b: any) => (a.order_index || 0) - (b.order_index || 0))
+
+            const reordered = Array.from(projectItems)
+            const [moved] = reordered.splice(source.index, 1)
+            reordered.splice(destination.index, 0, moved)
+
+            const orderMap = new Map(reordered.map((item: any, idx: number) => [item.id, idx]))
+            setTasks((prev: any[]) => prev.map((t: any) => (
+                t.project_id === projectId && t.status !== 'completed' && orderMap.has(t.id)
+                    ? { ...t, order_index: orderMap.get(t.id) }
+                    : t
+            )))
+
+            for (let i = 0; i < reordered.length; i++) {
+                await supabase.from('tasks').update({ order_index: i }).eq('id', (reordered[i] as any).id)
+            }
+            return
+        }
+
         const items = Array.from(activeTasks)
-        const [reorderedItem] = items.splice(result.source.index, 1)
-        items.splice(result.destination.index, 0, reorderedItem)
+        const [reorderedItem] = items.splice(source.index, 1)
+        items.splice(destination.index, 0, reorderedItem)
 
         // Update local state immediately for snappy UI
         const newTasks = tasks.map((t: any) => {
@@ -1572,41 +1619,59 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                             </form>
                         )}
 
-                        <DragDropContext onDragEnd={onDragEnd}>
-                            <Droppable droppableId="active-tasks">
-                                {(provided) => (
-                                    <ul
-                                        {...provided.droppableProps}
-                                        ref={provided.innerRef}
-                                        className="list-none p-0 m-0"
-                                    >
-                                        {activeTasks.length === 0 && <li className="text-gray-500 py-4 text-center">このエリアにアクティブなクエストはありません。</li>}
-
-                                        {activeTab === 'all' ? (
-                                            // 全体マップ時の構成：全プロジェクトを常にループ（タスクがなくても枠は残す）
-                                            projects.map((project: any) => {
-                                                const projectTasks = activeTasks.filter((t: any) => t.project_id === project.id);
-                                                return (
-                                                    <div key={project.id} className="mb-10">
-                                                        <h3 className="text-sm font-bold text-gray-500 mb-3 border-l-4 border-gray-700 pl-2 uppercase tracking-widest">{project.name}</h3>
-                                                        {projectTasks.length === 0 ? (
-                                                            <div className="text-[10px] text-gray-600 italic ml-6 mb-4">この地域にはまだクエストが存在しない...</div>
-                                                        ) : (
-                                                            projectTasks.map((task: any) => {
-                                                                const originalIndex = activeTasks.findIndex((t: any) => t.id === task.id);
-                                                                return renderTaskItem(task, originalIndex);
-                                                            })
-                                                        )}
-                                                    </div>
-                                                );
-                                            })
-                                        ) : (
-                                            activeTasks.map((task: any, index: number) => renderTaskItem(task, index))
-                                        )}
-                                        {provided.placeholder}
-                                    </ul>
-                                )}
-                            </Droppable>
+                        <DragDropContext onDragEnd={onDragEnd} onDragUpdate={onDragUpdate}>
+                            {activeTab === 'all' ? (
+                                <div className="list-none p-0 m-0">
+                                    {projects.map((project: any) => {
+                                        const projectTasks = activeTasks.filter((t: any) => t.project_id === project.id);
+                                        const projectDroppableId = `project-${project.id}`;
+                                        return (
+                                            <div key={project.id} className="mb-10">
+                                                <h3 className="text-sm font-bold text-gray-500 mb-3 border-l-4 border-gray-700 pl-2 uppercase tracking-widest">{project.name}</h3>
+                                                <Droppable droppableId={projectDroppableId}>
+                                                    {(provided, snapshot) => (
+                                                        <ul
+                                                            {...provided.droppableProps}
+                                                            ref={provided.innerRef}
+                                                            className={`list-none p-0 m-0 transition-all rounded-sm border
+                                                                ${snapshot.isDraggingOver ? 'border-yellow-500/80 bg-yellow-950/10 shadow-[0_0_0_1px_rgba(234,179,8,0.4)]' : 'border-transparent'}`}
+                                                        >
+                                                            {projectTasks.length === 0 && (
+                                                                <li className="text-[10px] text-gray-600 italic ml-6 mb-4 py-2">
+                                                                    この地域にはまだクエストが存在しない...
+                                                                </li>
+                                                            )}
+                                                            {projectTasks.map((task: any, index: number) => renderTaskItem(task, index, projectDroppableId))}
+                                                            {provided.placeholder}
+                                                            {dragDestination?.droppableId === projectDroppableId && dragDestination.index === projectTasks.length && projectTasks.length > 0 && (
+                                                                <li className="h-[2px] bg-yellow-400 mx-2 mb-2 shadow-[0_0_10px_rgba(250,204,21,0.8)]" />
+                                                            )}
+                                                        </ul>
+                                                    )}
+                                                </Droppable>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            ) : (
+                                <Droppable droppableId="active-tasks">
+                                    {(provided, snapshot) => (
+                                        <ul
+                                            {...provided.droppableProps}
+                                            ref={provided.innerRef}
+                                            className={`list-none p-0 m-0 transition-all rounded-sm
+                                                ${snapshot.isDraggingOver ? 'ring-1 ring-yellow-500/70 bg-yellow-950/10' : ''}`}
+                                        >
+                                            {activeTasks.length === 0 && <li className="text-gray-500 py-4 text-center">このエリアにアクティブなクエストはありません。</li>}
+                                            {activeTasks.map((task: any, index: number) => renderTaskItem(task, index, 'active-tasks'))}
+                                            {provided.placeholder}
+                                            {dragDestination?.droppableId === 'active-tasks' && dragDestination.index === activeTasks.length && activeTasks.length > 0 && (
+                                                <li className="h-[2px] bg-yellow-400 mx-2 mb-2 shadow-[0_0_10px_rgba(250,204,21,0.8)]" />
+                                            )}
+                                        </ul>
+                                    )}
+                                </Droppable>
+                            )}
                         </DragDropContext>
 
                     </div>
