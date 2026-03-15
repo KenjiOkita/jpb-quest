@@ -684,7 +684,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
     }, [tasks, user.email, displayName]);
 
     return (
-        <main className="py-12 min-h-screen relative">
+        <main className="py-12 min-h-screen relative max-w-4xl mx-auto px-4">
             {/* 🌟 クエスト完了演出オーバーレイ */}
             {isQuestClearing && (
                 <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm animate-in fade-in duration-500">
