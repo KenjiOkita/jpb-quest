@@ -376,11 +376,49 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
             const element = document.getElementById(`task-${taskId}`)
             if (element) {
                 element.scrollIntoView({ behavior: 'smooth', block: 'center' })
-                element.style.outline = '4px solid var(--active-color)'
-                element.style.outlineOffset = '2px'
-                setTimeout(() => {
-                    element.style.outline = 'none'
-                }, 2000)
+                // スクロール後に2回だけ点滅して、対象タスクを明確に示す
+                const blink = () => {
+                    element.style.outline = '4px solid transparent'
+                    element.style.outlineOffset = '2px'
+
+                    if (typeof element.animate === 'function') {
+                        const animation = element.animate(
+                            [
+                                { outlineColor: 'rgba(255,255,255,0)', boxShadow: '0 0 0 rgba(0,0,0,0)' },
+                                { outlineColor: 'rgba(255,255,255,1)', boxShadow: '0 0 0 2px rgba(255,255,255,0.35), 0 0 18px rgba(255,255,255,0.7)' },
+                                { outlineColor: 'rgba(255,255,255,0)', boxShadow: '0 0 0 rgba(0,0,0,0)' }
+                            ],
+                            { duration: 360, iterations: 2, easing: 'ease-in-out' }
+                        )
+                        animation.onfinish = () => {
+                            element.style.outline = 'none'
+                            element.style.boxShadow = ''
+                        }
+                    } else {
+                        let count = 0
+                        const turnOn = () => {
+                            element.style.outline = '4px solid var(--active-color)'
+                            element.style.boxShadow = '0 0 0 2px rgba(255,255,255,0.35), 0 0 18px rgba(255,255,255,0.7)'
+                        }
+                        const turnOff = () => {
+                            element.style.outline = 'none'
+                            element.style.boxShadow = ''
+                        }
+                        const pulse = () => {
+                            turnOn()
+                            setTimeout(() => {
+                                turnOff()
+                                count += 1
+                                if (count < 2) {
+                                    setTimeout(pulse, 90)
+                                }
+                            }, 170)
+                        }
+                        pulse()
+                    }
+                }
+
+                setTimeout(blink, 420)
             }
         }, 300)
     }
