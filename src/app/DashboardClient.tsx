@@ -49,6 +49,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
     const [isPushSupported, setIsPushSupported] = useState(false)
     const [isSubscribed, setIsSubscribed] = useState(false)
     const [subscriptionLoading, setSubscriptionLoading] = useState(false)
+    const [vapidConfigured] = useState(Boolean(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY))
     const [isRefreshing, setIsRefreshing] = useState(false)
     const [pullDistance, setPullDistance] = useState(0)
     const dueDateInputRef = useRef<HTMLInputElement | null>(null)
@@ -191,12 +192,14 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
 
                 // 🔔 通知のサポートチェックと登録確認
                 try {
-                    if (typeof window !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window) {
-                        setIsPushSupported(true);
-                        const registration = await navigator.serviceWorker.register('/service-worker.js');
-                        const subscription = await registration.pushManager.getSubscription();
-                        setIsSubscribed(!!subscription);
-                    }
+                if (vapidConfigured && typeof window !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window) {
+                    setIsPushSupported(true);
+                    const registration = await navigator.serviceWorker.register('/service-worker.js');
+                    const subscription = await registration.pushManager.getSubscription();
+                    setIsSubscribed(!!subscription);
+                } else if (!vapidConfigured) {
+                    setIsPushSupported(false);
+                }
                 } catch (err) {
                     console.error('[JPBQuest] SW初期チェックエラー:', err);
                 }
@@ -386,6 +389,11 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
     const subscribeToPush = async () => {
         if (subscriptionLoading) return;
         setSubscriptionLoading(true);
+        if (!vapidConfigured) {
+            alert('通知用の VAPID 公開鍵が設定されていません。管理者に確認してください。')
+            return
+        }
+
         try {
             const permission = await Notification.requestPermission();
             if (permission !== 'granted') {
@@ -1983,7 +1991,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                         <a href="/settings" className="text-gray-500 hover:text-white text-xl transition-colors" title="冒険者設定">⚙️</a>
                         <button onClick={handleLogout} className="text-gray-400 hover:text-white underline text-sm tracking-widest uppercase transition-colors">Sign Out</button>
                     </div>
-                    {isPushSupported && (
+                    {isPushSupported && vapidConfigured && (
                         <button
                             onClick={isSubscribed ? undefined : subscribeToPush}
                             disabled={subscriptionLoading || isSubscribed}
@@ -1994,6 +2002,13 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                         >
                             {subscriptionLoading ? '⌛...' : isSubscribed ? '🔔 通知有効' : '🔔 通知を有効にする'}
                         </button>
+                    )}
+                    {(!vapidConfigured || !isPushSupported) && (
+                        <div className="text-[9px] tracking-[0.3em] text-red-400 uppercase">
+                            {!vapidConfigured
+                                ? '通知用の公開鍵を設定してください'
+                                : 'このブラウザは通知に対応していません'}
+                        </div>
                     )}
                 </div>
             </div>
