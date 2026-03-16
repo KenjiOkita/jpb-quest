@@ -1954,7 +1954,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                         <img
                             src={avatarUrl || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(displayName || user.email || 'hero')}`}
                             alt="Avatar"
-                            className="w-20 h-20 pixelated-avatar border-4 border-white shadow-[4px_4px_0_#444] group-hover:brightness-75 transition-all cursor-pointer object-cover"
+                            className="w-20 h-20 aspect-square pixelated-avatar border-4 border-white shadow-[4px_4px_0_#444] group-hover:brightness-75 transition-all cursor-pointer object-cover"
                         />
                         <label className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 cursor-pointer text-[10px] text-white font-bold bg-black/50 text-center p-1 leading-tight">
                             {uploading ? '⬆️...' : '📷 変更'}
@@ -1962,7 +1962,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                         </label>
                     </div>
                     <div>
-                        <h1 className="hero-name-pixel text-3xl md:text-4xl text-white uppercase tracking-wider mb-1">
+                        <h1 className="hero-name-pixel text-3xl md:text-4xl text-white uppercase tracking-wider mb-1 max-w-[220px] md:max-w-none break-words">
                             {displayName}
                         </h1>
                         <div className="flex items-center gap-2">
@@ -1971,13 +1971,16 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                         </div>
                     </div>
                 </div>
-                <div className="flex items-center gap-4">
-                    {/* 🔔 通知購読ボタン */}
+                <div className="flex flex-col items-end gap-2">
+                    <div className="flex items-center gap-4">
+                        <a href="/settings" className="text-gray-500 hover:text-white text-xl transition-colors" title="冒険者設定">⚙️</a>
+                        <button onClick={handleLogout} className="text-gray-400 hover:text-white underline text-sm tracking-widest uppercase transition-colors">Sign Out</button>
+                    </div>
                     {isPushSupported && (
                         <button
                             onClick={isSubscribed ? undefined : subscribeToPush}
                             disabled={subscriptionLoading || isSubscribed}
-                            className={`flex items-center gap-2 px-3 py-1.5 border-2 text-[10px] font-bold transition-all
+                            className={`flex items-center gap-2 px-3 py-1 border-2 text-[9px] font-bold uppercase tracking-[0.3em] transition-all
                                 ${isSubscribed 
                                     ? 'border-green-600 text-green-400 cursor-default bg-green-950/20' 
                                     : 'border-yellow-600 text-yellow-400 hover:bg-yellow-600 hover:text-black shadow-[0_4px_0_#444] active:translate-y-1 active:shadow-none'}`}
@@ -1985,8 +1988,6 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                             {subscriptionLoading ? '⌛...' : isSubscribed ? '🔔 通知有効' : '🔔 通知を有効にする'}
                         </button>
                     )}
-                    <a href="/settings" className="text-gray-500 hover:text-white text-xl transition-colors" title="冒険者設定">⚙️</a>
-                    <button onClick={handleLogout} className="text-gray-400 hover:text-white underline text-sm tracking-widest uppercase transition-colors">Sign Out</button>
                 </div>
             </div>
 
