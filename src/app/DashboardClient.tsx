@@ -1,10 +1,13 @@
 'use client'
 
-import { useState, useMemo, useEffect, useRef } from 'react'
+import { useState, useMemo, useEffect, useRef, type ChangeEvent } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd'
 import PixelAvatar from '@/components/PixelAvatar'
+
+const COMMENT_IMAGE_BUCKET = 'comment-images'
+const PULL_REFRESH_THRESHOLD = 84
 
 export default function DashboardClient({ initialProjects, initialTasks, user }: any) {
     const [projects, setProjects] = useState(initialProjects)
@@ -38,13 +41,30 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
     const [activeProject, setActiveProject] = useState<any>(null)
     const [projectInviteCode, setProjectInviteCode] = useState<string | null>(null)
     const [projectMembers, setProjectMembers] = useState<any[]>([])
+    const [allProjectMembers, setAllProjectMembers] = useState<any[]>([])
     const [isQuestClearing, setIsQuestClearing] = useState(false)
     const [userProfiles, setUserProfiles] = useState<Record<string, { display_name: string, avatar_url: string }>>({})
     const [changingRoleUserId, setChangingRoleUserId] = useState<string | null>(null)
     const [dragDestination, setDragDestination] = useState<{ droppableId: string, index: number } | null>(null)
+    const [isPushSupported, setIsPushSupported] = useState(false)
+    const [isSubscribed, setIsSubscribed] = useState(false)
+    const [subscriptionLoading, setSubscriptionLoading] = useState(false)
+    const [isRefreshing, setIsRefreshing] = useState(false)
+    const [pullDistance, setPullDistance] = useState(0)
     const dueDateInputRef = useRef<HTMLInputElement | null>(null)
+    const pullStartYRef = useRef<number | null>(null)
+    const pullDistanceRef = useRef(0)
+    const isPullingRef = useRef(false)
+    const refreshInFlightRef = useRef(false)
+    const realtimeRefreshTimeoutRef = useRef<number | null>(null)
+    const pendingCommentReloadRef = useRef(false)
+    const supabaseRef = useRef<ReturnType<typeof createClient> | null>(null)
 
-    const supabase = createClient()
+    if (!supabaseRef.current) {
+        supabaseRef.current = createClient()
+    }
+
+    const supabase = supabaseRef.current
     const router = useRouter()
 
     const generateInviteCode = () => {
@@ -100,7 +120,8 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
         } else {
             alert('プロジェクトに参加しました！')
             setInviteCodeInput('')
-            fetchLatestData()
+            await fetchLatestData()
+            router.refresh()
         }
         setIsJoining(false)
     }
@@ -124,6 +145,19 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                 setTasks(taskData || [])
             }
 
+            const { data: memberData, error: memberError } = await supabase
+                .from('project_members')
+                .select('project_id, user_id, role')
+            if (memberError) {
+                console.error('[JPBQuest] メンバー取得エラー:', memberError.message)
+            } else {
+                const safeMembers = memberData || []
+                setAllProjectMembers(safeMembers)
+                if (activeTab !== 'all') {
+                    setProjectMembers(safeMembers.filter((member: any) => member.project_id === activeTab))
+                }
+            }
+
             // 全コメントの件数を取得してタスクIDごとに集計
             const { data: countData, error: commentError } = await supabase.from('comments').select('task_id')
             if (commentError) {
@@ -140,11 +174,6 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
             try {
                 const { data: profile, error: profileError } = await supabase.from('profiles').select('avatar_url, display_name').eq('id', user.id).maybeSingle()
                 
-                if (profileError) {
-                    console.warn('[JPBQuest] プロフィール取得スキップ（未作成）:', profileError.message)
-                }
-                
-                // プロフィールがある場合はそれを使うが、ない場合は名前からDiceBearを生成
                 const currentName = profile?.display_name || user.email?.split('@')[0] || 'hero'
                 setDisplayName(currentName)
                 
@@ -152,6 +181,18 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                     setAvatarUrl(profile.avatar_url)
                 } else {
                     setAvatarUrl(`https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(currentName)}`)
+                }
+
+                // 🔔 通知のサポートチェックと登録確認
+                try {
+                    if (typeof window !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window) {
+                        setIsPushSupported(true);
+                        const registration = await navigator.serviceWorker.register('/service-worker.js');
+                        const subscription = await registration.pushManager.getSubscription();
+                        setIsSubscribed(!!subscription);
+                    }
+                } catch (err) {
+                    console.error('[JPBQuest] SW初期チェックエラー:', err);
                 }
 
                 // 全メンバーのプロフィール情報を取得して userId -> { name, avatar } のマップを作成
@@ -181,6 +222,26 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
             }
         } catch (e) {
             console.error('[JPBQuest] データ取得中の予期せぬエラー:', e)
+        }
+    }
+
+    const refreshDashboardData = async () => {
+        if (refreshInFlightRef.current) return
+
+        refreshInFlightRef.current = true
+        setIsRefreshing(true)
+
+        try {
+            await fetchLatestData()
+            if (activeTab !== 'all') {
+                await fetchMyRole()
+            }
+            router.refresh()
+        } finally {
+            refreshInFlightRef.current = false
+            setIsRefreshing(false)
+            setPullDistance(0)
+            pullDistanceRef.current = 0
         }
     }
 
@@ -216,6 +277,45 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                 };
             };
         });
+    }
+
+    const uploadCommentImage = async (event: ChangeEvent<HTMLInputElement>) => {
+        const selectedFile = event.target.files?.[0]
+        if (!selectedFile) return
+
+        setUploading(true)
+
+        try {
+            const compressedBlob = await compressImage(selectedFile)
+            const blobType = compressedBlob.type || selectedFile.type || 'image/jpeg'
+            const extension = blobType === 'image/png' ? 'png' : 'jpg'
+            const baseName = selectedFile.name.replace(/\.[^/.]+$/, '').replace(/[^a-zA-Z0-9_-]+/g, '-')
+            const filePath = `${user.id}/${baseName || 'comment-image'}-${crypto.randomUUID()}.${extension}`
+
+            const { error: uploadError } = await supabase.storage
+                .from(COMMENT_IMAGE_BUCKET)
+                .upload(filePath, compressedBlob, {
+                    contentType: blobType,
+                    upsert: false
+                })
+
+            if (uploadError) throw uploadError
+
+            const { data: { publicUrl } } = supabase.storage
+                .from(COMMENT_IMAGE_BUCKET)
+                .getPublicUrl(filePath)
+
+            setNewCommentImageUrl(publicUrl)
+        } catch (error: any) {
+            if (error.message?.includes('Bucket not found')) {
+                alert('【要設定】Supabaseで comment-images バケットを作成し、add_comment_image_storage.sql を実行してください。')
+            } else {
+                alert('画像アップロード失敗: ' + error.message)
+            }
+        } finally {
+            setUploading(false)
+            event.target.value = ''
+        }
     }
 
     // 現在のプロジェクトでの自分の権限を確認する
@@ -265,8 +365,199 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
         fetchLatestData()
     }, [])
 
+    const urlBase64ToUint8Array = (base64String: string) => {
+        const padding = '='.repeat((4 - base64String.length % 4) % 4);
+        const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+        const rawData = window.atob(base64);
+        const outputArray = new Uint8Array(rawData.length);
+        for (let i = 0; i < rawData.length; ++i) {
+            outputArray[i] = rawData.charCodeAt(i);
+        }
+        return outputArray;
+    };
+
+    const subscribeToPush = async () => {
+        if (subscriptionLoading) return;
+        setSubscriptionLoading(true);
+        try {
+            const permission = await Notification.requestPermission();
+            if (permission !== 'granted') {
+                alert('通知が許可されませんでした。設定から許可してください。');
+                return;
+            }
+
+            const registration = await navigator.serviceWorker.ready;
+            const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+            
+            if (!publicKey) {
+                throw new Error('VAPID Public Key not found in .env');
+            }
+
+            const subscription = await registration.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey: urlBase64ToUint8Array(publicKey)
+            });
+
+            const { error } = await supabase.from('push_subscriptions').upsert({
+                user_id: user.id,
+                endpoint: subscription.endpoint,
+                p256dh: btoa(String.fromCharCode.apply(null, Array.from(new Uint8Array(subscription.getKey('p256dh')!)))),
+                auth: btoa(String.fromCharCode.apply(null, Array.from(new Uint8Array(subscription.getKey('auth')!)))),
+                updated_at: new Date().toISOString()
+            });
+
+            if (error) throw error;
+
+            setIsSubscribed(true);
+            alert('通知の受信設定が完了しました！これで離れていても連絡が届きます。');
+        } catch (err: any) {
+            console.error('[JPBQuest] 購読エラー:', err);
+            alert('通知登録に失敗しました: ' + err.message);
+        } finally {
+            setSubscriptionLoading(false);
+        }
+    };
+
     useEffect(() => {
         fetchMyRole()
+    }, [activeTab])
+
+    useEffect(() => {
+        if (activeTab === 'all') return
+        if (projects.some((project: any) => project.id === activeTab)) return
+
+        setActiveTab('all')
+        setActiveProject(null)
+        setProjectInviteCode(null)
+        setProjectMembers([])
+    }, [activeTab, projects])
+
+    useEffect(() => {
+        const scheduleRealtimeSync = (shouldReloadComments = false) => {
+            if (shouldReloadComments) {
+                pendingCommentReloadRef.current = true
+            }
+
+            if (realtimeRefreshTimeoutRef.current !== null) {
+                window.clearTimeout(realtimeRefreshTimeoutRef.current)
+            }
+
+            realtimeRefreshTimeoutRef.current = window.setTimeout(async () => {
+                realtimeRefreshTimeoutRef.current = null
+                const reloadExpandedComments = pendingCommentReloadRef.current
+                pendingCommentReloadRef.current = false
+
+                await fetchLatestData()
+
+                if (activeTab !== 'all') {
+                    await fetchMyRole()
+                }
+
+                if (reloadExpandedComments && expandedTaskId) {
+                    await loadCommentsForTask(expandedTaskId)
+                }
+            }, 180)
+        }
+
+        const realtimeChannel = supabase
+            .channel(`dashboard-realtime-${user.id}`)
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'projects' }, () => {
+                scheduleRealtimeSync()
+            })
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => {
+                scheduleRealtimeSync()
+            })
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'project_members' }, () => {
+                scheduleRealtimeSync()
+            })
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => {
+                scheduleRealtimeSync()
+            })
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'comments' }, (payload: any) => {
+                const changedTaskId = payload.new?.task_id || payload.old?.task_id
+                scheduleRealtimeSync(changedTaskId === expandedTaskId)
+            })
+            .subscribe()
+
+        return () => {
+            if (realtimeRefreshTimeoutRef.current !== null) {
+                window.clearTimeout(realtimeRefreshTimeoutRef.current)
+                realtimeRefreshTimeoutRef.current = null
+            }
+            pendingCommentReloadRef.current = false
+            void supabase.removeChannel(realtimeChannel)
+        }
+    }, [activeTab, expandedTaskId, supabase, user.id])
+
+    useEffect(() => {
+        const touchOptions: AddEventListenerOptions = { passive: false }
+
+        const handleTouchStart = (event: Event) => {
+            const touchEvent = event as TouchEvent
+            if (touchEvent.touches.length !== 1) return
+            if (window.scrollY > 0 || refreshInFlightRef.current) return
+            const target = touchEvent.target as HTMLElement | null
+            if (target?.closest('input, textarea, select, button')) return
+
+            pullStartYRef.current = touchEvent.touches[0]?.clientY ?? null
+            isPullingRef.current = true
+        }
+
+        const handleTouchMove = (event: Event) => {
+            const touchEvent = event as TouchEvent
+            if (!isPullingRef.current || pullStartYRef.current === null) return
+
+            if (window.scrollY > 0) {
+                isPullingRef.current = false
+                pullStartYRef.current = null
+                pullDistanceRef.current = 0
+                setPullDistance(0)
+                return
+            }
+
+            const currentY = touchEvent.touches[0]?.clientY ?? pullStartYRef.current
+            const delta = currentY - pullStartYRef.current
+
+            if (delta <= 0) {
+                pullDistanceRef.current = 0
+                setPullDistance(0)
+                return
+            }
+
+            const nextDistance = Math.min(delta * 0.55, 120)
+            pullDistanceRef.current = nextDistance
+            setPullDistance(nextDistance)
+
+            if (touchEvent.cancelable) {
+                touchEvent.preventDefault()
+            }
+        }
+
+        const finishPullGesture = () => {
+            const shouldRefresh = pullDistanceRef.current >= PULL_REFRESH_THRESHOLD
+            pullStartYRef.current = null
+            isPullingRef.current = false
+
+            if (shouldRefresh) {
+                void refreshDashboardData()
+                return
+            }
+
+            pullDistanceRef.current = 0
+            setPullDistance(0)
+        }
+
+        window.addEventListener('touchstart', handleTouchStart, touchOptions)
+        window.addEventListener('touchmove', handleTouchMove, touchOptions)
+        window.addEventListener('touchend', finishPullGesture)
+        window.addEventListener('touchcancel', finishPullGesture)
+
+        return () => {
+            window.removeEventListener('touchstart', handleTouchStart, touchOptions)
+            window.removeEventListener('touchmove', handleTouchMove, touchOptions)
+            window.removeEventListener('touchend', finishPullGesture)
+            window.removeEventListener('touchcancel', finishPullGesture)
+        }
     }, [activeTab])
 
     useEffect(() => {
@@ -943,40 +1234,8 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                                 type="file" 
                                                 accept="image/*" 
                                                 className="hidden" 
-                                                onChange={async (e) => {
-                                                    if (!e.target.files?.[0]) return;
-                                                    const originalFile = e.target.files[0];
-                                                    
-                                                    setUploading(true);
-                                                    
-                                                    // 1. 画像を圧縮
-                                                    const compressedBlob = await compressImage(originalFile);
-                                                    
-                                                    // TODO: Replace with actual Xserver upload API URL
-                                                    const UPLOAD_API_URL = 'https://jp-branding.com/jpb-quest/upload.php'; 
-                                                    
-                                                    const formData = new FormData();
-                                                    // 圧縮後のBlobを送信（ファイル名は継承）
-                                                    formData.append('image', compressedBlob, originalFile.name);
-
-                                                    try {
-                                                        const response = await fetch(UPLOAD_API_URL, {
-                                                            method: 'POST',
-                                                            body: formData
-                                                        });
-                                                        const result = await response.json();
-                                                        
-                                                        if (result.url) {
-                                                            setNewCommentImageUrl(result.url);
-                                                        } else {
-                                                            alert('アップロード失敗: ' + (result.error || '不明なエラー'));
-                                                        }
-                                                    } catch (err) {
-                                                        alert('通信エラー: エックスサーバーへのアップロードに失敗しました。');
-                                                    } finally {
-                                                        setUploading(false);
-                                                    }
-                                                }}
+                                                onChange={uploadCommentImage}
+                                                disabled={uploading}
                                             />
                                         </label>
                                         <span className="text-[9px] text-gray-600 italic">※YouTubeのURLを貼ると自動で動画が表示されます</span>
@@ -989,8 +1248,15 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                         className="w-full bg-black border-2 border-[#555] p-3 text-white text-sm outline-none focus:border-[var(--active-color)] transition-all resize-none font-inherit leading-relaxed"
                                     />
                                     {newCommentImageUrl && (
-                                        <div className="flex items-center justify-between text-xs border border-[#444] bg-black/70 px-3 py-2">
-                                            <span className="text-gray-300 truncate">📷 画像を添付済み</span>
+                                        <div className="flex items-center justify-between gap-3 text-xs border border-[#444] bg-black/70 px-3 py-2">
+                                            <div className="flex min-w-0 items-center gap-3">
+                                                <img
+                                                    src={newCommentImageUrl}
+                                                    alt="添付予定の画像"
+                                                    className="h-12 w-12 shrink-0 rounded border border-[#555] object-cover"
+                                                />
+                                                <span className="text-gray-300 truncate">📷 画像を添付済み</span>
+                                            </div>
                                             <button
                                                 type="button"
                                                 onClick={() => setNewCommentImageUrl(null)}
@@ -1373,14 +1639,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
         }
     }
 
-    const toggleTaskExpansion = async (taskId: string) => {
-        if (expandedTaskId === taskId) {
-            closeExpandedComments()
-            return
-        }
-
-        setExpandedTaskId(taskId)
-        setNewCommentImageUrl(null)
+    const loadCommentsForTask = async (taskId: string) => {
         const { data, error } = await supabase
             .from('comments')
             .select('*')
@@ -1390,6 +1649,17 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
         if (!error && data) {
             setComments(data)
         }
+    }
+
+    const toggleTaskExpansion = async (taskId: string) => {
+        if (expandedTaskId === taskId) {
+            closeExpandedComments()
+            return
+        }
+
+        setExpandedTaskId(taskId)
+        setNewCommentImageUrl(null)
+        await loadCommentsForTask(taskId)
     }
 
     const submitComment = async (e: React.FormEvent, taskId: string) => {
@@ -1518,11 +1788,14 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
     // 🌟 タスク担当ドロップダウン用のメンバー名
     const partyMembers = useMemo(() => {
         if (activeTab !== 'all') {
+            const currentUserName = displayName || user.email?.split('@')[0] || '勇者'
             const names = projectMembers
-                .map((m: any) => userProfiles[m.user_id]?.display_name)
+                .map((m: any) => {
+                    if (m.user_id === user.id) return currentUserName
+                    return userProfiles[m.user_id]?.display_name || `冒険者-${String(m.user_id).slice(0, 4)}`
+                })
                 .filter(Boolean) as string[]
 
-            const currentUserName = displayName || user.email?.split('@')[0] || '勇者'
             if (projectMembers.some((m: any) => m.user_id === user.id)) {
                 names.push(currentUserName)
             }
@@ -1550,12 +1823,45 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
         const roleOrder: Record<string, number> = { owner: 0, admin: 1, member: 2 }
 
         if (activeTab === 'all') {
-            return partyMembers.map((name) => ({
-                user_id: name,
-                display_name: name,
-                avatar_url: getFallbackAvatar(name),
-                role: 'member'
-            }))
+            const mergedMembers = new Map<string, { user_id: string, role: string }>()
+
+            allProjectMembers.forEach((member: any) => {
+                const resolvedRole = member.role || 'member'
+                const existing = mergedMembers.get(member.user_id)
+
+                if (!existing || (roleOrder[resolvedRole] ?? 99) < (roleOrder[existing.role] ?? 99)) {
+                    mergedMembers.set(member.user_id, {
+                        user_id: member.user_id,
+                        role: resolvedRole
+                    })
+                }
+            })
+
+            if (!mergedMembers.has(user.id)) {
+                mergedMembers.set(user.id, {
+                    user_id: user.id,
+                    role: userRole || 'member'
+                })
+            }
+
+            return Array.from(mergedMembers.values())
+                .map((member) => {
+                    const profile = userProfiles[member.user_id]
+                    const fallbackName = member.user_id === user.id ? (displayName || user.email?.split('@')[0] || '冒険者') : '冒険者'
+                    const displayNameResolved = profile?.display_name || fallbackName
+
+                    return {
+                        user_id: member.user_id,
+                        display_name: displayNameResolved,
+                        avatar_url: profile?.avatar_url || getFallbackAvatar(displayNameResolved),
+                        role: member.role
+                    }
+                })
+                .sort((a, b) => {
+                    const roleDiff = (roleOrder[a.role] ?? 99) - (roleOrder[b.role] ?? 99)
+                    if (roleDiff !== 0) return roleDiff
+                    return a.display_name.localeCompare(b.display_name, 'ja')
+                })
         }
 
         return projectMembers
@@ -1575,7 +1881,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                 if (roleDiff !== 0) return roleDiff
                 return a.display_name.localeCompare(b.display_name, 'ja')
             })
-    }, [activeTab, projectMembers, userProfiles, user.id, user.email, displayName, partyMembers])
+    }, [activeTab, allProjectMembers, projectMembers, userProfiles, user.id, user.email, displayName, userRole])
 
     const getDisplayNameByUserId = (userId?: string | null) => {
         if (!userId) return '不明'
@@ -1583,8 +1889,31 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
         return userProfiles[userId]?.display_name || '冒険者'
     }
 
+    const getProjectNameById = (projectId?: string | null) => {
+        if (!projectId) return '不明な拠点'
+        return projects.find((project: any) => project.id === projectId)?.name || '不明な拠点'
+    }
+
     return (
         <main className="py-6 md:py-12 min-h-screen relative max-w-none md:max-w-4xl mx-0 md:mx-auto px-0 md:px-4 overflow-x-clip">
+            {(pullDistance > 0 || isRefreshing) && (
+                <div
+                    className="fixed left-1/2 top-3 z-[220] transition-all duration-150"
+                    style={{ transform: `translate(-50%, ${isRefreshing ? 0 : Math.min(pullDistance, PULL_REFRESH_THRESHOLD)}px)` }}
+                >
+                    <div className="min-w-[172px] rounded-sm border-2 border-white bg-black/90 px-4 py-2 text-center shadow-[0_0_0_2px_#000,0_0_0_4px_#fff]">
+                        <div className="text-[10px] font-bold tracking-[0.25em] text-yellow-300">
+                            {isRefreshing ? 'NOW LOADING' : pullDistance >= PULL_REFRESH_THRESHOLD ? 'RELEASE TO REFRESH' : 'PULL TO REFRESH'}
+                        </div>
+                        <div className="mt-1 h-1.5 overflow-hidden rounded-full border border-gray-600 bg-[#111]">
+                            <div
+                                className="h-full bg-yellow-400 transition-all duration-150"
+                                style={{ width: `${isRefreshing ? 100 : Math.min((pullDistance / PULL_REFRESH_THRESHOLD) * 100, 100)}%` }}
+                            />
+                        </div>
+                    </div>
+                </div>
+            )}
             {zoomImageUrl && (
                 <div
                     className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
@@ -1643,6 +1972,19 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                     </div>
                 </div>
                 <div className="flex items-center gap-4">
+                    {/* 🔔 通知購読ボタン */}
+                    {isPushSupported && (
+                        <button
+                            onClick={isSubscribed ? undefined : subscribeToPush}
+                            disabled={subscriptionLoading || isSubscribed}
+                            className={`flex items-center gap-2 px-3 py-1.5 border-2 text-[10px] font-bold transition-all
+                                ${isSubscribed 
+                                    ? 'border-green-600 text-green-400 cursor-default bg-green-950/20' 
+                                    : 'border-yellow-600 text-yellow-400 hover:bg-yellow-600 hover:text-black shadow-[0_4px_0_#444] active:translate-y-1 active:shadow-none'}`}
+                        >
+                            {subscriptionLoading ? '⌛...' : isSubscribed ? '🔔 通知有効' : '🔔 通知を有効にする'}
+                        </button>
+                    )}
                     <a href="/settings" className="text-gray-500 hover:text-white text-xl transition-colors" title="冒険者設定">⚙️</a>
                     <button onClick={handleLogout} className="text-gray-400 hover:text-white underline text-sm tracking-widest uppercase transition-colors">Sign Out</button>
                 </div>
@@ -1681,6 +2023,11 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                     )}
                                     <div className="flex-grow">
                                         <div className="text-xl mb-1 group-hover/emergency:text-white transition-colors">{task.title}</div>
+                                        {activeTab === 'all' && (
+                                            <div className="mb-1 text-[10px] text-gray-300 uppercase tracking-[0.18em]">
+                                                🏰 {getProjectNameById(task.project_id)}
+                                            </div>
+                                        )}
                                         <div className="text-[var(--danger-color)] text-[10px] uppercase font-bold flex justify-between items-center">
                                             <span>▶︎ BOSS ENCOUNTER</span>
                                             <span className="animate-pulse">WATCH OUT!</span>
