@@ -120,7 +120,11 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
         } else {
             alert('プロジェクトに参加しました！')
             setInviteCodeInput('')
-            await fetchLatestData()
+            const { projects: refreshedProjects } = await fetchLatestData()
+            const joinedProject = refreshedProjects.find((project: any) => (project.invite_code || '').trim().toLowerCase() === normalizedCode)
+            if (joinedProject) {
+                setActiveTab(joinedProject.id)
+            }
             router.refresh()
         }
         setIsJoining(false)
@@ -128,6 +132,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
 
     // 最新データを再取得して永続性を確保する（エラー時は既存データを保持）
     const fetchLatestData = async () => {
+        let projectList: any[] = []
         try {
             const { data: projData, error: projError } = await supabase.from('projects').select('*')
             if (projError) {
@@ -135,6 +140,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
             } else {
                 // データが空（0件）であってもステートを更新する
                 setProjects(projData || [])
+                projectList = projData || []
             }
 
             const { data: taskData, error: taskError } = await supabase.from('tasks').select('*').order('order_index', { ascending: true })
@@ -223,6 +229,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
         } catch (e) {
             console.error('[JPBQuest] データ取得中の予期せぬエラー:', e)
         }
+        return { projects: projectList }
     }
 
     const refreshDashboardData = async () => {
