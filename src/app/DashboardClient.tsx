@@ -2407,26 +2407,6 @@ export default function DashboardClient({ initialProjects, initialTasks, initial
                             )}
                         </DragDropContext>
                     </div>
-                </div>
-
-                <div className="w-full lg:w-1/3 flex flex-col gap-6">
-                    {/* 右カラム：サイドバー */}
-                    <PartySidebar
-                        inviteCodeInput={inviteCodeInput}
-                        setInviteCodeInput={setInviteCodeInput}
-                        joinProject={joinProject}
-                        isJoining={isJoining}
-                        activeTab={activeTab}
-                        setActiveTab={setActiveTab}
-                        projects={projects}
-                        joinedPartyRoster={joinedPartyRoster}
-                        registeredOnlyPartyRoster={registeredOnlyPartyRoster}
-                        partyRoster={partyRoster}
-                        ROSTER_DEBUG_MARKER={ROSTER_DEBUG_MARKER}
-                        totalKnownProfiles={totalKnownProfiles}
-                        isManager={isManager}
-                        renderPartyMemberRow={renderPartyMemberRow}
-                    />
 
                 {/* アーカイブ */}
                 {completedTasks.length > 0 && (
@@ -2688,8 +2668,28 @@ export default function DashboardClient({ initialProjects, initialTasks, initial
                         )}
                     </div>
                 )}
+                </div>
+
+                <div className="w-full lg:w-1/3 flex flex-col gap-6">
+                    {/* 右カラム：サイドバー */}
+                    <PartySidebar
+                        inviteCodeInput={inviteCodeInput}
+                        setInviteCodeInput={setInviteCodeInput}
+                        joinProject={joinProject}
+                        isJoining={isJoining}
+                        activeTab={activeTab}
+                        setActiveTab={setActiveTab}
+                        projects={projects}
+                        joinedPartyRoster={joinedPartyRoster}
+                        registeredOnlyPartyRoster={registeredOnlyPartyRoster}
+                        partyRoster={partyRoster}
+                        ROSTER_DEBUG_MARKER={ROSTER_DEBUG_MARKER}
+                        totalKnownProfiles={totalKnownProfiles}
+                        isManager={isManager}
+                        renderPartyMemberRow={renderPartyMemberRow}
+                    />
+                </div>
             </div>
-        </div>
     </main>
     )
 }
