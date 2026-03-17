@@ -1,4 +1,8 @@
 import { createClient } from '@/lib/supabase/server'
+import { fetchAccessibleProjects } from '@/lib/projects'
+import { fetchAccessibleProjectMembers } from '@/lib/projectMembers'
+import { fetchAccessibleTasks } from '@/lib/tasks'
+import { fetchPublicProfiles } from '@/lib/supabase/publicProfiles'
 import DashboardClient from './DashboardClient'
 import { redirect } from 'next/navigation'
 
@@ -20,26 +24,21 @@ async function DashboardContainer() {
   }
 
   // 2. Fetch projects logic mapping to their RLS policies
-  const { data: projects, error: _projectsError } = await supabase
-    .from('projects')
-    .select('*')
-    .order('created_at', { ascending: true })
+  const { data: projects } = await fetchAccessibleProjects(supabase)
 
   // 3. Fetch tasks logic
-  const { data: tasks, error: _tasksError } = await supabase
-    .from('tasks')
-    .select('*, assignee_id')
-    .order('created_at', { ascending: false })
+  const { data: tasks } = await fetchAccessibleTasks(supabase)
 
-  // Note: For a real app with many users, we should join with auth.users or a profiles table.
-  // For this prototype, we'll map the assignee to the user email or generic avatar if needed.
-  // However, Supabase auth.users is NOT queryable by default from the frontend/anon role. 
-  // We'll manage it simply in the client component.
+  const { data: projectMembers } = await fetchAccessibleProjectMembers(supabase)
+
+  const initialUserProfiles = await fetchPublicProfiles().catch(() => ({}))
 
   return (
     <DashboardClient
       initialProjects={projects || []}
       initialTasks={tasks || []}
+      initialProjectMembers={projectMembers || []}
+      initialUserProfiles={initialUserProfiles}
       user={user}
     />
   )

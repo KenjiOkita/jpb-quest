@@ -1,15 +1,23 @@
 'use client'
 
 import { useState, useMemo, useEffect, useRef, type ChangeEvent } from 'react'
+import { fetchAccessibleProjects } from '@/lib/projects'
 import { createClient } from '@/lib/supabase/client'
+import { fetchAccessibleProjectMembers, fetchProjectMembersForProject } from '@/lib/projectMembers'
+import { fetchAccessibleTasks } from '@/lib/tasks'
+import { fetchPublicProfiles } from '@/lib/supabase/publicProfiles'
 import { useRouter } from 'next/navigation'
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd'
 import PixelAvatar from '@/components/PixelAvatar'
+import QuestCreateForm from '@/components/QuestCreateForm'
+import PartySidebar from '@/components/PartySidebar'
 
 const COMMENT_IMAGE_BUCKET = 'comment-images'
 const PULL_REFRESH_THRESHOLD = 84
+const ROSTER_DEBUG_MARKER = 'roster-debug v6'
+type UserProfileMap = Record<string, { display_name: string, avatar_url: string }>
 
-export default function DashboardClient({ initialProjects, initialTasks, user }: any) {
+export default function DashboardClient({ initialProjects, initialTasks, initialProjectMembers = [], initialUserProfiles = {}, user }: any) {
     const [projects, setProjects] = useState(initialProjects)
     const [tasks, setTasks] = useState(initialTasks)
     const [activeTab, setActiveTab] = useState('all')
@@ -32,18 +40,17 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
     const [newTaskPriority, setNewTaskPriority] = useState('normal') // normal, elite, boss
     const [newTaskDueDate, setNewTaskDueDate] = useState('')
     const [userRole, setUserRole] = useState<string | null>(null) // 'owner', 'admin', 'member'
-    const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
-    const [displayName, setDisplayName] = useState<string>('')
+    const [avatarUrl, setAvatarUrl] = useState<string | null>(initialUserProfiles[user.id]?.avatar_url || null)
+    const [displayName, setDisplayName] = useState<string>(initialUserProfiles[user.id]?.display_name || '')
     const [uploading, setUploading] = useState(false)
     const [commentCounts, setCommentCounts] = useState<Record<string, number>>({})
     const [isJoining, setIsJoining] = useState(false)
     const [inviteCodeInput, setInviteCodeInput] = useState('')
     const [activeProject, setActiveProject] = useState<any>(null)
     const [projectInviteCode, setProjectInviteCode] = useState<string | null>(null)
-    const [projectMembers, setProjectMembers] = useState<any[]>([])
-    const [allProjectMembers, setAllProjectMembers] = useState<any[]>([])
+    const [allProjectMembers, setAllProjectMembers] = useState<any[]>(initialProjectMembers)
     const [isQuestClearing, setIsQuestClearing] = useState(false)
-    const [userProfiles, setUserProfiles] = useState<Record<string, { display_name: string, avatar_url: string }>>({})
+    const [userProfiles, setUserProfiles] = useState<UserProfileMap>(initialUserProfiles)
     const [changingRoleUserId, setChangingRoleUserId] = useState<string | null>(null)
     const [dragDestination, setDragDestination] = useState<{ droppableId: string, index: number } | null>(null)
     const [isPushSupported, setIsPushSupported] = useState(false)
@@ -57,6 +64,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
     const pullDistanceRef = useRef(0)
     const isPullingRef = useRef(false)
     const refreshInFlightRef = useRef(false)
+    const backgroundSyncInFlightRef = useRef(false)
     const realtimeRefreshTimeoutRef = useRef<number | null>(null)
     const pendingCommentReloadRef = useRef(false)
     const supabaseRef = useRef<ReturnType<typeof createClient> | null>(null)
@@ -67,6 +75,40 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
 
     const supabase = supabaseRef.current
     const router = useRouter()
+    const knownUserProfiles = useMemo<UserProfileMap>(
+        () => ({ ...(initialUserProfiles as UserProfileMap), ...userProfiles }),
+        [initialUserProfiles, userProfiles]
+    )
+    const currentProjectMembers = useMemo(
+        () => activeTab === 'all'
+            ? []
+            : allProjectMembers.filter((member: any) => member.project_id === activeTab),
+        [activeTab, allProjectMembers]
+    )
+
+    const mergeProjectMembersForProject = (projectId: string, membersForProject: any[]) => {
+        setAllProjectMembers((prev: any[]) => {
+            const otherProjects = prev.filter((member: any) => member.project_id !== projectId)
+            const dedupedMembers = membersForProject.filter((member: any, index: number, source: any[]) => (
+                source.findIndex((candidate: any) => (
+                    candidate.project_id === member.project_id && candidate.user_id === member.user_id
+                )) === index
+            ))
+            return [...otherProjects, ...dedupedMembers]
+        })
+    }
+
+    const syncProjectMemberState = (targetTab: string, memberSource: any[] = allProjectMembers) => {
+        if (targetTab === 'all') {
+            setUserRole('admin')
+            return
+        }
+
+        const membersForProject = memberSource.filter((member: any) => member.project_id === targetTab)
+
+        const myMemberRow = membersForProject.find((member: any) => member.user_id === user.id)
+        setUserRole(myMemberRow?.role || null)
+    }
 
     const generateInviteCode = () => {
         const chars = 'abcdefghijklmnopqrstuvwxyz0123456789'
@@ -115,16 +157,21 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
         if (!inviteCodeInput) return
         setIsJoining(true)
         const normalizedCode = inviteCodeInput.trim().toLowerCase()
-        const { error } = await supabase.rpc('join_project_by_code', { target_invite_code: normalizedCode })
+        const { data: joinedProjectId, error } = await supabase.rpc('join_project_by_code', { target_invite_code: normalizedCode })
         if (error) {
             alert('参加エラー: ' + error.message)
         } else {
             alert('プロジェクトに参加しました！')
             setInviteCodeInput('')
-            const { projects: refreshedProjects } = await fetchLatestData()
-            const joinedProject = refreshedProjects.find((project: any) => (project.invite_code || '').trim().toLowerCase() === normalizedCode)
-            if (joinedProject) {
-                setActiveTab(joinedProject.id)
+            const joinedId = typeof joinedProjectId === 'string' ? joinedProjectId : null
+            const { projects: refreshedProjects } = await fetchLatestData(joinedId || undefined)
+            if (joinedId) {
+                setActiveTab(joinedId)
+            } else {
+                const joinedProject = refreshedProjects.find((project: any) => (project.invite_code || '').trim().toLowerCase() === normalizedCode)
+                if (joinedProject) {
+                    setActiveTab(joinedProject.id)
+                }
             }
             router.refresh()
         }
@@ -132,10 +179,11 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
     }
 
     // 最新データを再取得して永続性を確保する（エラー時は既存データを保持）
-    const fetchLatestData = async () => {
+    const fetchLatestData = async (nextActiveTab?: string) => {
+        const targetActiveTab = nextActiveTab ?? activeTab
         let projectList: any[] = []
         try {
-            const { data: projData, error: projError } = await supabase.from('projects').select('*')
+            const { data: projData, error: projError } = await fetchAccessibleProjects(supabase)
             if (projError) {
                 console.error('[JPBQuest] プロジェクト取得エラー:', projError.message)
             } else {
@@ -144,7 +192,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                 projectList = projData || []
             }
 
-            const { data: taskData, error: taskError } = await supabase.from('tasks').select('*').order('order_index', { ascending: true })
+            const { data: taskData, error: taskError } = await fetchAccessibleTasks(supabase)
             if (taskError) {
                 console.error('[JPBQuest] タスク取得エラー:', taskError.message)
             } else {
@@ -152,16 +200,22 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                 setTasks(taskData || [])
             }
 
-            const { data: memberData, error: memberError } = await supabase
-                .from('project_members')
-                .select('project_id, user_id, role')
+            const { data: memberData, error: memberError } = await fetchAccessibleProjectMembers(supabase)
             if (memberError) {
                 console.error('[JPBQuest] メンバー取得エラー:', memberError.message)
             } else {
                 const safeMembers = memberData || []
                 setAllProjectMembers(safeMembers)
-                if (activeTab !== 'all') {
-                    setProjectMembers(safeMembers.filter((member: any) => member.project_id === activeTab))
+                syncProjectMemberState(targetActiveTab, safeMembers)
+            }
+
+            if (targetActiveTab !== 'all') {
+                const { data: projectMemberData, error: projectMemberError } = await fetchProjectMembersForProject(supabase, targetActiveTab)
+                if (projectMemberError) {
+                    console.error('[JPBQuest] プロジェクト別メンバー取得エラー:', projectMemberError.message)
+                } else if (projectMemberData) {
+                    mergeProjectMembersForProject(targetActiveTab, projectMemberData)
+                    syncProjectMemberState(targetActiveTab, projectMemberData)
                 }
             }
 
@@ -180,10 +234,10 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
             // アバターと表示名の取得
             try {
                 const { data: profile, error: profileError } = await supabase.from('profiles').select('avatar_url, display_name').eq('id', user.id).maybeSingle()
-                
+
                 const currentName = profile?.display_name || user.email?.split('@')[0] || 'hero'
                 setDisplayName(currentName)
-                
+
                 if (profile?.avatar_url) {
                     setAvatarUrl(profile.avatar_url)
                 } else {
@@ -192,40 +246,40 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
 
                 // 🔔 通知のサポートチェックと登録確認
                 try {
-                if (vapidConfigured && typeof window !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window) {
-                    setIsPushSupported(true);
-                    const registration = await navigator.serviceWorker.register('/service-worker.js');
-                    const subscription = await registration.pushManager.getSubscription();
-                    setIsSubscribed(!!subscription);
-                } else if (!vapidConfigured) {
-                    setIsPushSupported(false);
-                }
+                    if (vapidConfigured && typeof window !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window) {
+                        setIsPushSupported(true);
+                        const registration = await navigator.serviceWorker.register('/service-worker.js');
+                        const subscription = await registration.pushManager.getSubscription();
+                        setIsSubscribed(!!subscription);
+                    } else if (!vapidConfigured) {
+                        setIsPushSupported(false);
+                    }
                 } catch (err) {
                     console.error('[JPBQuest] SW初期チェックエラー:', err);
                 }
 
                 // 全メンバーのプロフィール情報を取得して userId -> { name, avatar } のマップを作成
-                const { data: allProfiles } = await supabase.from('profiles').select('id, display_name, avatar_url')
-                const profileMap: Record<string, { display_name: string, avatar_url: string }> = {}
-                
-                if (allProfiles) {
-                    allProfiles.forEach((p: any) => {
-                        profileMap[p.id] = {
-                            display_name: p.display_name || '冒険者',
-                            avatar_url: p.avatar_url || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(p.display_name || p.id)}`
-                        }
-                    })
+                let publicProfiles: Record<string, { display_name: string, avatar_url: string }> = {}
+                try {
+                    publicProfiles = await fetchPublicProfiles()
+                } catch (allProfilesError: any) {
+                    console.error('[JPBQuest] 全プロフィール取得エラー:', allProfilesError.message)
                 }
-                
-                // 自分の情報がまだmapにない場合（初回など）の補完
-                if (!profileMap[user.id]) {
-                    profileMap[user.id] = {
-                        display_name: currentName,
-                        avatar_url: avatarUrl || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(currentName)}`
+                setUserProfiles((prev) => {
+                    const profileMap: Record<string, { display_name: string, avatar_url: string }> = {
+                        ...prev,
+                        ...publicProfiles,
                     }
-                }
-                
-                setUserProfiles(profileMap)
+
+                    if (!profileMap[user.id]) {
+                        profileMap[user.id] = {
+                            display_name: currentName,
+                            avatar_url: avatarUrl || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(currentName)}`
+                        }
+                    }
+
+                    return profileMap
+                })
             } catch (e) {
                 console.error('[JPBQuest] プロフィール処理エラー:', e)
             }
@@ -242,7 +296,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
         setIsRefreshing(true)
 
         try {
-            await fetchLatestData()
+            await fetchLatestData(activeTab)
             if (activeTab !== 'all') {
                 await fetchMyRole()
             }
@@ -331,17 +385,17 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
     // 現在のプロジェクトでの自分の権限を確認する
     const fetchMyRole = async () => {
         if (activeTab === 'all') {
-            setUserRole('admin') // 全体マップでは全表示
             setActiveProject(null)
             setProjectInviteCode(null)
-            setProjectMembers([])
+            syncProjectMemberState('all')
             return
         }
 
-        const { data: projData, error: projError } = await supabase.from('projects').select('*').eq('id', activeTab).maybeSingle()
+        const { data: projDataSet, error: projError } = await fetchAccessibleProjects(supabase)
         if (projError) {
             console.error('[JPBQuest] プロジェクト取得エラー:', projError.message)
         }
+        const projData = (projDataSet || []).find((project: any) => project.id === activeTab) || null
         if (projData) {
             setActiveProject(projData)
             if (projData.invite_code) {
@@ -352,27 +406,20 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
             }
         }
 
-        const { data } = await supabase
-            .from('project_members')
-            .select('role')
-            .eq('project_id', activeTab)
-            .eq('user_id', user.id)
-            .single()
-        if (data) setUserRole(data.role)
-
-        // プロジェクトの全メンバーを取得（軍師以上なら管理できるように）
-        const { data: members } = await supabase
-            .from('project_members')
-            .select('user_id, role')
-            .eq('project_id', activeTab)
-        if (members) {
-            // ここでは簡易的にメールアドレスを想定（本来は profiles と結合）
-            setProjectMembers(members)
+        const { data: projectMemberData, error: projectMemberError } = await fetchProjectMembersForProject(supabase, activeTab)
+        if (projectMemberError) {
+            console.error('[JPBQuest] プロジェクト別メンバー取得エラー:', projectMemberError.message)
+        } else if (projectMemberData) {
+            mergeProjectMembersForProject(activeTab, projectMemberData)
+            syncProjectMemberState(activeTab, projectMemberData)
+            return
         }
+
+        syncProjectMemberState(activeTab)
     }
 
     useEffect(() => {
-        fetchLatestData()
+        fetchLatestData(activeTab)
     }, [])
 
     const urlBase64ToUint8Array = (base64String: string) => {
@@ -391,6 +438,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
         setSubscriptionLoading(true);
         if (!vapidConfigured) {
             alert('通知用の VAPID 公開鍵が設定されていません。管理者に確認してください。')
+            setSubscriptionLoading(false)
             return
         }
 
@@ -403,7 +451,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
 
             const registration = await navigator.serviceWorker.ready;
             const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
-            
+
             if (!publicKey) {
                 throw new Error('VAPID Public Key not found in .env');
             }
@@ -438,13 +486,37 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
     }, [activeTab])
 
     useEffect(() => {
+        syncProjectMemberState(activeTab)
+    }, [activeTab, allProjectMembers])
+
+    useEffect(() => {
+        const intervalId = window.setInterval(() => {
+            if (document.visibilityState !== 'visible') return
+            if (refreshInFlightRef.current || backgroundSyncInFlightRef.current) return
+
+            backgroundSyncInFlightRef.current = true
+            void (async () => {
+                try {
+                    await fetchLatestData(activeTab)
+                    if (activeTab !== 'all') {
+                        await fetchMyRole()
+                    }
+                } finally {
+                    backgroundSyncInFlightRef.current = false
+                }
+            })()
+        }, 3500)
+
+        return () => window.clearInterval(intervalId)
+    }, [activeTab])
+
+    useEffect(() => {
         if (activeTab === 'all') return
         if (projects.some((project: any) => project.id === activeTab)) return
 
         setActiveTab('all')
         setActiveProject(null)
         setProjectInviteCode(null)
-        setProjectMembers([])
     }, [activeTab, projects])
 
     useEffect(() => {
@@ -462,7 +534,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                 const reloadExpandedComments = pendingCommentReloadRef.current
                 pendingCommentReloadRef.current = false
 
-                await fetchLatestData()
+                await fetchLatestData(activeTab)
 
                 if (activeTab !== 'all') {
                     await fetchMyRole()
@@ -635,7 +707,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
 
     // ユーザーIDからプロフィール情報を取得するヘルパー
     const getProfile = (userId: string) => {
-        return userProfiles[userId] || {
+        return knownUserProfiles[userId] || {
             display_name: '冒険者',
             avatar_url: `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(userId)}`
         }
@@ -644,8 +716,32 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
     // 名前（テキスト）からフォールバック用のアバターURLを取得
     const getFallbackAvatar = (name: string) => {
         // 名前が一致するプロフィールを探す
-        const found = Object.values(userProfiles).find(p => p.display_name === name)
+        const found = Object.values(knownUserProfiles).find(p => p.display_name === name)
         return found?.avatar_url || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(name)}`
+    }
+
+    const getMemberDisplayName = (targetUserId?: string | null) => {
+        if (!targetUserId) return '不明'
+        if (targetUserId === user.id) return displayName || user.email?.split('@')[0] || '冒険者'
+        return knownUserProfiles[targetUserId]?.display_name || `冒険者-${String(targetUserId).slice(0, 4)}`
+    }
+
+    const getAssignableMembersForTask = (task: any) => {
+        const sourceMembers = activeTab === 'all'
+            ? allProjectMembers.filter((member: any) => member.project_id === task.project_id)
+            : currentProjectMembers
+
+        const uniqueMembers = new Map<string, any>()
+        sourceMembers.forEach((member: any) => {
+            uniqueMembers.set(member.user_id, member)
+        })
+
+        return Array.from(uniqueMembers.values())
+            .map((member: any) => ({
+                user_id: member.user_id,
+                display_name: getMemberDisplayName(member.user_id)
+            }))
+            .sort((a, b) => a.display_name.localeCompare(b.display_name, 'ja'))
     }
 
     const normalizeAssigneeName = (value?: string | null) => (value || '').trim().toLowerCase()
@@ -666,8 +762,8 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
             return "https://api.dicebear.com/7.x/pixel-art/svg?seed=none&backgroundColor=333333&eyes=none&mouth=none";
         }
 
-        if (assigneeId && userProfiles[assigneeId]) {
-            return userProfiles[assigneeId].avatar_url;
+        if (assigneeId && knownUserProfiles[assigneeId]) {
+            return knownUserProfiles[assigneeId].avatar_url;
         }
 
         const name = assigneeName || 'unknown'
@@ -720,7 +816,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
         if (activeTab !== 'all' && activeTab !== projectId) {
             setActiveTab(projectId)
         }
-        
+
         // DOMの更新を待ってからスクロール
         setTimeout(() => {
             const element = document.getElementById(`task-${taskId}`)
@@ -793,7 +889,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
             if (!input) return
             input.focus()
             try {
-                ;(input as any).showPicker?.()
+                ; (input as any).showPicker?.()
             } catch (_) {
                 // iOS Safari など showPicker 未対応ブラウザ向け
             }
@@ -1050,7 +1146,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                 </div>
                             </div>
 
-                                <div className="flex flex-col items-center w-[64px] md:w-[72px] shrink-0 border-l border-white/10 ml-1 md:ml-3 pl-2 md:pl-3 pt-0.5 md:pt-0">
+                            <div className="flex flex-col items-center w-[64px] md:w-[72px] shrink-0 border-l border-white/10 ml-1 md:ml-3 pl-2 md:pl-3 pt-0.5 md:pt-0">
                                 <div className="text-[9px] text-gray-500 uppercase tracking-tighter mb-1 md:hidden">担当冒険者</div>
                                 {isManager ? (
                                     <div className="flex flex-col items-center w-full gap-1 md:gap-1">
@@ -1070,13 +1166,13 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                             )}
                                         </div>
                                         <select
-                                            value={isUnassignedTask(task) ? '' : (task.assignee_name || '')}
+                                            value={task.assignee_id || ''}
                                             onChange={(e) => updateAssignee(task.id, e.target.value)}
                                             className="bg-black border border-gray-600 text-[9px] md:text-[9px] text-gray-300 outline-none w-full p-1 md:p-0.5 cursor-pointer hover:border-[var(--active-color)]"
                                         >
                                             <option value="">未定</option>
-                                            {partyMembers.map((name, i) => (
-                                                <option key={i} value={name as string}>{name as string}</option>
+                                            {getAssignableMembersForTask(task).map((member) => (
+                                                <option key={member.user_id} value={member.user_id}>{member.display_name}</option>
                                             ))}
                                         </select>
                                     </div>
@@ -1098,7 +1194,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                             )}
                                         </div>
                                         <span className="text-[9px] md:text-[9px] text-center text-gray-400 truncate w-full">
-                                            {isUnassignedTask(task) ? '未アサイン' : (task.assignee_id ? (userProfiles[task.assignee_id]?.display_name || task.assignee_name || '担当未定') : (task.assignee_name || '担当未定'))}
+                                            {isUnassignedTask(task) ? '未アサイン' : (task.assignee_id ? (knownUserProfiles[task.assignee_id]?.display_name || task.assignee_name || '担当未定') : (task.assignee_name || '担当未定'))}
                                         </span>
                                     </div>
                                 )}
@@ -1121,10 +1217,10 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                             const isEditing = editingCommentId === comment.id
                                             return (
                                                 <div key={comment.id} className="flex gap-3 mb-2">
-                                                    <img 
-                                                        src={profile.avatar_url} 
-                                                        alt="Avatar" 
-                                                        className="w-10 h-10 pixelated-avatar shrink-0 border-2 border-[#555] object-cover" 
+                                                    <img
+                                                        src={profile.avatar_url}
+                                                        alt="Avatar"
+                                                        className="w-10 h-10 pixelated-avatar shrink-0 border-2 border-[#555] object-cover"
                                                     />
                                                     <div className="bg-black border-2 border-[#444] p-3 rounded-sm relative grow shadow-sm">
                                                         <div className="absolute top-4 -left-2.5 w-0 h-0 border-t-6 border-t-transparent border-r-10 border-r-[#444] border-b-6 border-b-transparent"></div>
@@ -1172,14 +1268,14 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                                                 </div>
                                                             </div>
                                                         )}
-                                                        
+
                                                         {/* 🖼️ 画像表示 */}
                                                         {comment.image_url && (
                                                             <div className="mt-2 mb-3 border-2 border-[#333] inline-block">
-                                                                <img 
-                                                                    src={comment.image_url} 
-                                                                    alt="添付画像" 
-                                                                    className="max-w-full max-h-[300px] object-contain cursor-zoom-in" 
+                                                                <img
+                                                                    src={comment.image_url}
+                                                                    alt="添付画像"
+                                                                    className="max-w-full max-h-[300px] object-contain cursor-zoom-in"
                                                                     onClick={() => setZoomImageUrl(comment.image_url)}
                                                                 />
                                                             </div>
@@ -1191,13 +1287,13 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                                             if (embedUrl) {
                                                                 return (
                                                                     <div className="aspect-video mt-2 border-2 border-[#333]">
-                                                                        <iframe 
-                                                                            width="100%" 
-                                                                            height="100%" 
-                                                                            src={embedUrl} 
-                                                                            title="YouTube video player" 
-                                                                            frameBorder="0" 
-                                                                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" 
+                                                                        <iframe
+                                                                            width="100%"
+                                                                            height="100%"
+                                                                            src={embedUrl}
+                                                                            title="YouTube video player"
+                                                                            frameBorder="0"
+                                                                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
                                                                             allowFullScreen
                                                                         ></iframe>
                                                                     </div>
@@ -1245,10 +1341,10 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                     <div className="flex items-center gap-2 mb-1">
                                         <label className="cursor-pointer flex items-center gap-1 text-[10px] text-yellow-300 hover:text-yellow-200 bg-[#2b2300] px-2 py-1 rounded border-2 border-yellow-500 shadow-[0_0_0_1px_rgba(255,204,0,0.2)]">
                                             <span>📷 写真を添付</span>
-                                            <input 
-                                                type="file" 
-                                                accept="image/*" 
-                                                className="hidden" 
+                                            <input
+                                                type="file"
+                                                accept="image/*"
+                                                className="hidden"
                                                 onChange={uploadCommentImage}
                                                 disabled={uploading}
                                             />
@@ -1323,7 +1419,13 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
             if (memError) {
                 alert('メンバー追加エラー: ' + memError.message)
             } else {
+                setAllProjectMembers((prev: any[]) => {
+                    const alreadyExists = prev.some((member: any) => member.project_id === newProjectId && member.user_id === user.id)
+                    if (alreadyExists) return prev
+                    return [...prev, { project_id: newProjectId, user_id: user.id, role: 'owner' }]
+                })
                 setProjects([...projects, { id: newProjectId, name: newProjectName, invite_code: inviteCode }])
+                setActiveTab(newProjectId)
                 setNewProjectName('')
                 router.refresh()
             }
@@ -1337,10 +1439,9 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
         if (!newTaskTitle || activeTab === 'all') return
 
         const newTaskId = crypto.randomUUID();
-        const currentUserName = (displayName || user.email?.split('@')[0] || '勇者').trim()
-        const trimmedAssignee = (newTaskAssignee || '').trim()
-        const assigneeName = trimmedAssignee || '未定'
-        const assigneeId = trimmedAssignee ? (trimmedAssignee === currentUserName ? user.id : null) : null
+        const selectedMember = currentProjectMembers.find((member: any) => member.user_id === newTaskAssignee)
+        const assigneeId = selectedMember?.user_id || null
+        const assigneeName = selectedMember ? getMemberDisplayName(selectedMember.user_id) : '未定'
 
         const { error } = await supabase
             .from('tasks')
@@ -1450,10 +1551,15 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
 
     const updateAssignee = async (taskId: string, newValue?: string) => {
         const rawValue = newValue !== undefined ? newValue : editAssigneeValue
-        const trimmedValue = (rawValue || '').trim()
-        const currentUserName = (displayName || user.email?.split('@')[0] || '勇者').trim()
-        const assigneeName = trimmedValue || '未定'
-        const assigneeId = trimmedValue ? (trimmedValue === currentUserName ? user.id : null) : null
+        const selectedUserId = (rawValue || '').trim()
+        const targetTask = tasks.find((task: any) => task.id === taskId)
+        if (!targetTask) return
+
+        const selectedMember = allProjectMembers.find((member: any) => (
+            member.project_id === targetTask.project_id && member.user_id === selectedUserId
+        ))
+        const assigneeId = selectedMember?.user_id || null
+        const assigneeName = selectedMember ? getMemberDisplayName(selectedMember.user_id) : '未定'
 
         const { error } = await supabase
             .from('tasks')
@@ -1469,7 +1575,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
     const canEditMemberRole = (targetUserId: string, targetRole: string) => {
         if (activeTab === 'all') return false
         if (targetUserId === user.id) return false
-        if (targetRole === 'owner') return false
+        if (targetRole === 'owner' || targetRole === 'registered') return false
         if (userRole === 'owner') return true
         if (userRole === 'admin') return targetRole === 'member'
         return false
@@ -1477,7 +1583,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
 
     const updateMemberRole = async (targetUserId: string, nextRole: string) => {
         if (activeTab === 'all') return
-        if (!canEditMemberRole(targetUserId, projectMembers.find((m: any) => m.user_id === targetUserId)?.role || 'member')) return
+        if (!canEditMemberRole(targetUserId, currentProjectMembers.find((m: any) => m.user_id === targetUserId)?.role || 'member')) return
         setChangingRoleUserId(targetUserId)
 
         const { error } = await supabase.rpc('set_project_member_role', {
@@ -1489,8 +1595,8 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
         if (error) {
             alert('役職変更エラー: ' + error.message)
         } else {
-            setProjectMembers((prev: any[]) => prev.map((m: any) => (
-                m.user_id === targetUserId ? { ...m, role: nextRole } : m
+            setAllProjectMembers((prev: any[]) => prev.map((m: any) => (
+                m.project_id === activeTab && m.user_id === targetUserId ? { ...m, role: nextRole } : m
             )))
         }
 
@@ -1803,17 +1909,9 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
     // 🌟 タスク担当ドロップダウン用のメンバー名
     const partyMembers = useMemo(() => {
         if (activeTab !== 'all') {
-            const currentUserName = displayName || user.email?.split('@')[0] || '勇者'
-            const names = projectMembers
-                .map((m: any) => {
-                    if (m.user_id === user.id) return currentUserName
-                    return userProfiles[m.user_id]?.display_name || `冒険者-${String(m.user_id).slice(0, 4)}`
-                })
+            const names = currentProjectMembers
+                .map((m: any) => getMemberDisplayName(m.user_id))
                 .filter(Boolean) as string[]
-
-            if (projectMembers.some((m: any) => m.user_id === user.id)) {
-                names.push(currentUserName)
-            }
             return Array.from(new Set(names)).sort()
         }
 
@@ -1821,7 +1919,7 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
         const namesFromProfiles = tasks
             .map((t: any) => {
                 if (!t.assignee_id) return null
-                return userProfiles[t.assignee_id]?.display_name || null
+                return knownUserProfiles[t.assignee_id]?.display_name || null
             })
             .filter(Boolean) as string[]
 
@@ -1832,17 +1930,24 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
 
         const currentUser = displayName || user.email?.split('@')[0] || '勇者';
         return Array.from(new Set([currentUser, ...namesFromProfiles, ...legacyNames])).sort();
-    }, [activeTab, projectMembers, userProfiles, displayName, user.email, user.id, tasks]);
+    }, [activeTab, currentProjectMembers, knownUserProfiles, displayName, user.email, user.id, tasks]);
 
     const partyRoster = useMemo(() => {
-        const roleOrder: Record<string, number> = { owner: 0, admin: 1, member: 2 }
+        const roleOrder: Record<string, number> = { owner: 0, admin: 1, member: 2, registered: 3 }
 
         if (activeTab === 'all') {
             const mergedMembers = new Map<string, { user_id: string, role: string }>()
+            const memberProjects = new Map<string, Set<string>>()
 
             allProjectMembers.forEach((member: any) => {
                 const resolvedRole = member.role || 'member'
                 const existing = mergedMembers.get(member.user_id)
+                const projectName = projects.find((project: any) => project.id === member.project_id)?.name || '不明な拠点'
+
+                if (!memberProjects.has(member.user_id)) {
+                    memberProjects.set(member.user_id, new Set<string>())
+                }
+                memberProjects.get(member.user_id)?.add(projectName)
 
                 if (!existing || (roleOrder[resolvedRole] ?? 99) < (roleOrder[existing.role] ?? 99)) {
                     mergedMembers.set(member.user_id, {
@@ -1859,17 +1964,27 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                 })
             }
 
+            Object.keys(knownUserProfiles).forEach((userId) => {
+                if (!mergedMembers.has(userId)) {
+                    mergedMembers.set(userId, {
+                        user_id: userId,
+                        role: 'registered'
+                    })
+                }
+            })
+
             return Array.from(mergedMembers.values())
                 .map((member) => {
-                    const profile = userProfiles[member.user_id]
-                    const fallbackName = member.user_id === user.id ? (displayName || user.email?.split('@')[0] || '冒険者') : '冒険者'
-                    const displayNameResolved = profile?.display_name || fallbackName
+                    const profile = knownUserProfiles[member.user_id]
+                    const displayNameResolved = getMemberDisplayName(member.user_id)
+                    const projectNames = Array.from(memberProjects.get(member.user_id) || []).sort((a, b) => a.localeCompare(b, 'ja'))
 
                     return {
                         user_id: member.user_id,
                         display_name: displayNameResolved,
                         avatar_url: profile?.avatar_url || getFallbackAvatar(displayNameResolved),
-                        role: member.role
+                        role: member.role,
+                        project_names: projectNames
                     }
                 })
                 .sort((a, b) => {
@@ -1879,16 +1994,34 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                 })
         }
 
-        return projectMembers
+        const projectRoster = new Map<string, { user_id: string, role: string }>()
+
+        currentProjectMembers.forEach((member: any) => {
+            projectRoster.set(member.user_id, {
+                user_id: member.user_id,
+                role: member.role || 'member'
+            })
+        })
+
+        Object.keys(knownUserProfiles).forEach((userId) => {
+            if (!projectRoster.has(userId)) {
+                projectRoster.set(userId, {
+                    user_id: userId,
+                    role: 'registered'
+                })
+            }
+        })
+
+        return Array.from(projectRoster.values())
             .map((m: any) => {
-                const profile = userProfiles[m.user_id]
-                const fallbackName = m.user_id === user.id ? (displayName || user.email?.split('@')[0] || '冒険者') : '冒険者'
-                const displayNameResolved = profile?.display_name || fallbackName
+                const profile = knownUserProfiles[m.user_id]
+                const displayNameResolved = getMemberDisplayName(m.user_id)
                 return {
                     user_id: m.user_id,
                     display_name: displayNameResolved,
                     avatar_url: profile?.avatar_url || getFallbackAvatar(displayNameResolved),
-                    role: m.role || 'member'
+                    role: m.role || 'member',
+                    project_names: [projects.find((project: any) => project.id === activeTab)?.name || '不明な拠点']
                 }
             })
             .sort((a, b) => {
@@ -1896,17 +2029,81 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                 if (roleDiff !== 0) return roleDiff
                 return a.display_name.localeCompare(b.display_name, 'ja')
             })
-    }, [activeTab, allProjectMembers, projectMembers, userProfiles, user.id, user.email, displayName, userRole])
+    }, [activeTab, allProjectMembers, currentProjectMembers, knownUserProfiles, user.id, user.email, displayName, userRole, projects])
+
+    const joinedPartyRoster = useMemo(
+        () => partyRoster.filter((member: any) => member.role !== 'registered'),
+        [partyRoster]
+    )
+
+    const registeredOnlyPartyRoster = useMemo(
+        () => partyRoster.filter((member: any) => member.role === 'registered'),
+        [partyRoster]
+    )
+
+    const totalKnownProfiles = useMemo(
+        () => Object.keys(knownUserProfiles).length,
+        [knownUserProfiles]
+    )
 
     const getDisplayNameByUserId = (userId?: string | null) => {
         if (!userId) return '不明'
-        if (userId === user.id) return displayName || user.email?.split('@')[0] || '冒険者'
-        return userProfiles[userId]?.display_name || '冒険者'
+        return getMemberDisplayName(userId)
     }
 
     const getProjectNameById = (projectId?: string | null) => {
         if (!projectId) return '不明な拠点'
         return projects.find((project: any) => project.id === projectId)?.name || '不明な拠点'
+    }
+
+    const renderPartyMemberRow = (member: any) => {
+        const canEdit = canEditMemberRole(member.user_id, member.role)
+        const roleLabel = member.role === 'owner'
+            ? 'オーナー'
+            : member.role === 'admin'
+                ? '軍師'
+                : member.role === 'registered'
+                    ? (activeTab === 'all' ? '登録済み' : '未参加')
+                    : 'メンバー'
+
+        return (
+            <div key={member.user_id} className="flex items-center gap-2 bg-gray-900 border border-gray-700 p-1.5 px-2 rounded-sm">
+                <img
+                    src={member.avatar_url}
+                    alt={member.display_name}
+                    className="w-5 h-5 pixelated-avatar border border-black object-cover"
+                />
+                <div className="min-w-0 flex-1">
+                    <div className="text-sm text-gray-300 truncate">{member.display_name}</div>
+                    {activeTab === 'all' && (
+                        <div className="text-[9px] text-gray-500 truncate">
+                            {member.project_names?.length ? `所属: ${member.project_names.join(' / ')}` : '所属: 未参加'}
+                        </div>
+                    )}
+                    {activeTab !== 'all' && member.role === 'registered' && (
+                        <div className="text-[9px] text-gray-500 truncate">
+                            この拠点には未参加
+                        </div>
+                    )}
+                </div>
+                <span className="text-[10px] text-gray-400 border border-gray-600 px-1.5 py-0.5 rounded">{roleLabel}</span>
+                {activeTab !== 'all' && isManager && (
+                    canEdit ? (
+                        <select
+                            value={member.role}
+                            disabled={changingRoleUserId === member.user_id}
+                            onChange={(e) => updateMemberRole(member.user_id, e.target.value)}
+                            className="bg-black border border-gray-600 text-[10px] text-gray-300 p-1 cursor-pointer"
+                        >
+                            <option value="member">メンバー</option>
+                            <option value="admin">軍師</option>
+                        </select>
+                    ) : (
+                        <span className="text-[10px] text-gray-600">{member.user_id === user.id ? '自分' : '固定'}</span>
+                    )
+                )}
+            </div>
+        )
     }
 
     return (
@@ -1963,47 +2160,59 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                     </div>
                 </div>
             )}
-            <div className="flex justify-between items-center mb-6 md:mb-10 border-b-4 border-double border-white pb-4 md:pb-6 bg-black p-3 md:p-6 shadow-[0_0_0_2px_#000,0_0_0_4px_#fff] md:shadow-[0_0_0_4px_#000,0_0_0_8px_#fff] mx-0 md:mx-4 relative overflow-hidden">
-                <div className="flex items-center gap-6">
-                    <div className="relative group">
-                        <img
-                            src={avatarUrl || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(displayName || user.email || 'hero')}`}
-                            alt="Avatar"
-                            className="w-20 h-20 aspect-square pixelated-avatar border-4 border-white shadow-[4px_4px_0_#444] group-hover:brightness-75 transition-all cursor-pointer object-cover"
-                        />
-                        <label className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 cursor-pointer text-[10px] text-white font-bold bg-black/50 text-center p-1 leading-tight">
-                            {uploading ? '⬆️...' : '📷 変更'}
-                            <input type="file" className="hidden" accept="image/*" onChange={uploadAvatar} disabled={uploading} />
-                        </label>
-                    </div>
-                    <div>
-                        <h1 className="hero-name-pixel text-3xl md:text-4xl text-white uppercase tracking-wider mb-1 max-w-[220px] md:max-w-none break-words">
-                            {displayName}
-                        </h1>
-                        <div className="flex items-center gap-2">
-                            <span className="text-[10px] text-[var(--muted-color)] uppercase tracking-tighter">LV 99 LEGENDARY HERO</span>
-                            <span className="text-[10px] bg-yellow-900/50 text-yellow-300 px-2 py-0.5 rounded-full border border-yellow-600 font-bold uppercase tracking-widest">{userRole || 'Loading...'}</span>
+            <div className="mb-6 md:mb-10 border-b-4 border-double border-white pb-4 md:pb-6 bg-black p-3 md:p-6 shadow-[0_0_0_2px_#000,0_0_0_4px_#fff] md:shadow-[0_0_0_4px_#000,0_0_0_8px_#fff] mx-0 md:mx-4 relative overflow-hidden">
+                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <div className="flex items-start gap-3 md:gap-6 min-w-0">
+                        <div className="relative group shrink-0 w-16 h-16 md:w-20 md:h-20 aspect-square border-4 border-white shadow-[4px_4px_0_#444] overflow-hidden">
+                            <img
+                                src={avatarUrl || `https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(displayName || user.email || 'hero')}`}
+                                alt="Avatar"
+                                className="w-full h-full object-cover object-center [image-rendering:pixelated] group-hover:brightness-75 transition-all cursor-pointer scale-[1.2]"
+                            />
+                            <label className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 cursor-pointer text-[10px] text-white font-bold bg-black/50 text-center p-1 leading-tight">
+                                {uploading ? '⬆️...' : '📷 変更'}
+                                <input type="file" className="hidden" accept="image/*" onChange={uploadAvatar} disabled={uploading} />
+                            </label>
+                        </div>
+                        <div className="min-w-0 flex-1">
+                            <h1 className="hero-name-pixel text-[22px] sm:text-2xl md:text-4xl text-white uppercase tracking-[0.04em] mb-1 min-w-[6ch] max-w-[12ch] md:max-w-none leading-[1.05] whitespace-nowrap overflow-hidden text-ellipsis">
+                                {displayName}
+                            </h1>
+                            <div className="mt-1 flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                                <span className="text-[10px] text-[var(--muted-color)] uppercase tracking-tighter">LV 99 LEGENDARY HERO</span>
+                                <span className="text-[10px] bg-yellow-900/50 text-yellow-300 px-2 py-0.5 rounded-full border border-yellow-600 font-bold uppercase tracking-widest">{userRole || 'Loading...'}</span>
+                            </div>
                         </div>
                     </div>
-                </div>
-                <div className="flex flex-col items-end gap-2">
-                    <div className="flex items-center gap-4">
-                        <a href="/settings" className="text-gray-500 hover:text-white text-xl transition-colors" title="冒険者設定">⚙️</a>
-                        <button onClick={handleLogout} className="text-gray-400 hover:text-white underline text-sm tracking-widest uppercase transition-colors">Sign Out</button>
+                    <div className="w-full md:w-auto flex items-center justify-end gap-3 border-t border-gray-800 pt-2 md:border-0 md:pt-0">
+                        <a
+                            href="/settings"
+                            className="inline-flex items-center justify-center w-8 h-8 text-gray-500 hover:text-white text-xl border border-gray-700 hover:border-gray-400 transition-colors"
+                            title="冒険者設定"
+                        >
+                            ⚙️
+                        </a>
+                        <button
+                            onClick={handleLogout}
+                            className="text-gray-300 hover:text-white text-[11px] md:text-sm tracking-[0.2em] uppercase transition-colors border border-gray-700 px-2.5 py-1 hover:border-gray-400"
+                        >
+                            Sign Out
+                        </button>
                     </div>
-                    {isPushSupported && vapidConfigured && (
+                </div>
+                <div className="mt-3 border border-gray-700 bg-black/70 px-3 py-2 flex justify-end">
+                    {isPushSupported && vapidConfigured ? (
                         <button
                             onClick={isSubscribed ? undefined : subscribeToPush}
                             disabled={subscriptionLoading || isSubscribed}
-                            className={`flex items-center gap-2 px-3 py-1 border-2 text-[9px] font-bold uppercase tracking-[0.3em] transition-all
+                            className={`flex items-center gap-2 px-3 py-1 border-2 text-[8px] md:text-[9px] font-bold uppercase tracking-[0.18em] md:tracking-[0.3em] transition-all
                                 ${isSubscribed 
                                     ? 'border-green-600 text-green-400 cursor-default bg-green-950/20' 
                                     : 'border-yellow-600 text-yellow-400 hover:bg-yellow-600 hover:text-black shadow-[0_4px_0_#444] active:translate-y-1 active:shadow-none'}`}
                         >
                             {subscriptionLoading ? '⌛...' : isSubscribed ? '🔔 通知有効' : '🔔 通知を有効にする'}
                         </button>
-                    )}
-                    {(!vapidConfigured || !isPushSupported) && (
+                    ) : (
                         <div className="text-[9px] tracking-[0.3em] text-red-400 uppercase">
                             {!vapidConfigured
                                 ? '通知用の公開鍵を設定してください'
@@ -2028,8 +2237,8 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                             const avatar = getAssigneeAvatar(task.assignee_id, task.assignee_name);
                             const isUnassigned = isUnassignedTask(task);
                             return (
-                                <div 
-                                    key={task.id} 
+                                <div
+                                    key={task.id}
                                     onClick={() => scrollToTask(task.id, task.project_id)}
                                     className="border-2 border-[var(--danger-color)] p-3 flex items-center gap-4 bg-[rgba(255,51,51,0.1)] cursor-pointer hover:translate-x-1 hover:bg-[rgba(255,51,51,0.2)] transition-all group/emergency"
                                 >
@@ -2038,10 +2247,10 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                             <span className="text-xl leading-none font-bold">?</span>
                                         </div>
                                     ) : (
-                                        <img 
-                                            src={avatar} 
-                                            alt="担当者" 
-                                            className="w-12 h-12 pixelated-avatar border border-[var(--danger-color)] object-cover shadow-[0_0_10px_rgba(255,51,51,0.3)]" 
+                                        <img
+                                            src={avatar}
+                                            alt="担当者"
+                                            className="w-12 h-12 pixelated-avatar border border-[var(--danger-color)] object-cover shadow-[0_0_10px_rgba(255,51,51,0.3)]"
                                         />
                                     )}
                                     <div className="flex-grow">
@@ -2128,77 +2337,19 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
 
                         {/* 特定のプロジェクト内ならタスク追加フォームを表示（軍師以上） */}
                         {activeTab !== 'all' && isManager && (
-                            <form onSubmit={createTask} className="mb-10 p-6 bg-black border-4 border-white shadow-[0_0_0_4px_#000,0_0_0_8px_#fff]">
-                                <div className="flex flex-col gap-5">
-                                    <h3 className="text-xl border-b-2 border-dashed border-[#555] pb-3 text-white tracking-widest">📜 新規クエスト発行</h3>
-
-                                    {/* クエスト名（縦積み&全幅） */}
-                                    <div className="flex flex-col gap-2">
-                                        <label className="text-[11px] text-[#aaa] uppercase tracking-[0.2em] font-bold">クエスト名</label>
-                                        <input
-                                            type="text"
-                                            value={newTaskTitle}
-                                            onChange={e => setNewTaskTitle(e.target.value)}
-                                            placeholder="例: スライムを3匹倒す"
-                                            className="bg-black border-4 border-white p-4 text-white outline-none text-xl font-inherit placeholder:text-gray-700 focus:bg-[#111] w-full"
-                                        />
-                                    </div>
-
-                                    {/* 担当者（縦積み&全幅） */}
-                                    <div className="flex flex-col gap-2">
-                                        <label className="text-[11px] text-[#aaa] uppercase tracking-[0.2em] font-bold">担当者</label>
-                                        <select
-                                            value={newTaskAssignee}
-                                            onChange={e => setNewTaskAssignee(e.target.value)}
-                                            className="bg-black border-4 border-white p-4 text-white outline-none text-lg font-inherit focus:bg-[#111] w-full cursor-pointer"
-                                        >
-                                            <option value="">-- パーティメンバーを選択 --</option>
-                                            {partyMembers.map((name, i) => (
-                                                <option key={i} value={name as string}>{name as string}</option>
-                                            ))}
-                                        </select>
-                                    </div>
-
-                                    {/* 強さ選択（縦積み） */}
-                                    <div className="flex flex-col gap-2">
-                                        <label className="text-[11px] text-[#aaa] uppercase tracking-[0.2em] font-bold">強さ（敵ランク）</label>
-                                        <select
-                                            value={newTaskPriority}
-                                            onChange={e => setNewTaskPriority(e.target.value)}
-                                            className={`border-4 p-4 outline-none text-lg w-full cursor-pointer transition-colors
-                                                ${newTaskPriority === 'boss'
-                                                    ? 'bg-red-950/40 border-red-500 text-red-100 shadow-[0_0_14px_rgba(239,68,68,0.3)]'
-                                                    : newTaskPriority === 'elite'
-                                                        ? 'bg-amber-950/35 border-amber-500 text-amber-100 shadow-[0_0_10px_rgba(245,158,11,0.25)]'
-                                                        : 'bg-black border-white text-white focus:bg-[#111]'}`}
-                                        >
-                                            <option value="normal">⚔️ 雑魚敵 — 通常タスク</option>
-                                            <option value="elite">🟠 中ボス — 重要タスク</option>
-                                            <option value="boss">🔴 大ボス — 最優先・緊急</option>
-                                        </select>
-                                    </div>
-
-                                    {/* 期限（縦積み） */}
-                                    <div className="flex flex-col gap-2">
-                                        <label className="text-[11px] text-[#aaa] uppercase tracking-[0.2em] font-bold">期限（逃走日時）</label>
-                                        <input
-                                            type="datetime-local"
-                                            value={newTaskDueDate}
-                                            onChange={e => setNewTaskDueDate(e.target.value)}
-                                            className="bg-black border-4 border-white p-4 text-white outline-none text-lg font-inherit focus:bg-[#111] w-full cursor-pointer invert brightness-200"
-                                            style={{ colorScheme: 'dark' }}
-                                        />
-                                    </div>
-
-                                    {/* 送信ボタン */}
-                                    <button
-                                        type="submit"
-                                        className="w-full bg-white text-black border-4 border-black py-5 text-2xl hover:bg-yellow-100 transition-all font-bold shadow-[0_8px_0_#888] active:translate-y-2 active:shadow-none tracking-[0.2em]"
-                                    >
-                                        💡 クエストを依頼する
-                                    </button>
-                                </div>
-                            </form>
+                            <QuestCreateForm
+                                onSubmit={createTask}
+                                newTaskTitle={newTaskTitle}
+                                setNewTaskTitle={setNewTaskTitle}
+                                newTaskAssignee={newTaskAssignee}
+                                setNewTaskAssignee={setNewTaskAssignee}
+                                newTaskPriority={newTaskPriority}
+                                setNewTaskPriority={setNewTaskPriority}
+                                newTaskDueDate={newTaskDueDate}
+                                setNewTaskDueDate={setNewTaskDueDate}
+                                currentProjectMembers={currentProjectMembers}
+                                getMemberDisplayName={getMemberDisplayName}
+                            />
                         )}
 
                         <DragDropContext onDragEnd={onDragEnd} onDragUpdate={onDragUpdate}>
@@ -2255,369 +2406,291 @@ export default function DashboardClient({ initialProjects, initialTasks, user }:
                                 </Droppable>
                             )}
                         </DragDropContext>
-
                     </div>
                 </div>
 
-                {/* 右カラム：サイドバー */}
                 <div className="w-full lg:w-1/3 flex flex-col gap-6">
+                    {/* 右カラム：サイドバー */}
+                    <PartySidebar
+                        inviteCodeInput={inviteCodeInput}
+                        setInviteCodeInput={setInviteCodeInput}
+                        joinProject={joinProject}
+                        isJoining={isJoining}
+                        activeTab={activeTab}
+                        setActiveTab={setActiveTab}
+                        projects={projects}
+                        joinedPartyRoster={joinedPartyRoster}
+                        registeredOnlyPartyRoster={registeredOnlyPartyRoster}
+                        partyRoster={partyRoster}
+                        ROSTER_DEBUG_MARKER={ROSTER_DEBUG_MARKER}
+                        totalKnownProfiles={totalKnownProfiles}
+                        isManager={isManager}
+                        renderPartyMemberRow={renderPartyMemberRow}
+                    />
 
-                    <div className="retro-window">
-                        <h3 className="text-gray-400 mb-3 text-lg border-b border-gray-600 pb-1">📜 招待の呪文を入力</h3>
-                        <div className="flex flex-col gap-2">
-                            <input
-                                type="text"
-                                value={inviteCodeInput}
-                                onChange={(e) => setInviteCodeInput(e.target.value)}
-                                placeholder="招待コード（8文字）"
-                                className="bg-black border-2 border-white p-2 text-white outline-none text-xs font-mono"
-                            />
-                            <button
-                                onClick={joinProject}
-                                disabled={isJoining || inviteCodeInput.length < 8}
-                                className="bg-white text-black text-xs font-bold py-2 hover:bg-yellow-400 disabled:opacity-50 transition-colors"
-                            >
-                                {isJoining ? '通信中...' : 'パーティに参加する'}
-                            </button>
+                {/* アーカイブ */}
+                {completedTasks.length > 0 && (
+                    <div className="mt-8 border-t-2 border-dashed border-gray-500 pt-4 bg-black/65 backdrop-blur-[1px] px-3 md:px-4 pb-3 rounded-sm">
+                        <h3 className="text-yellow-300 mb-1 text-lg font-bold tracking-wide">🪦 討伐完了（アーカイブ）</h3>
+                        <div className="text-[11px] text-gray-300 mb-4">
+                            {activeTab === 'all'
+                                ? '各拠点ごとに完了したクエストを一覧表示しています。'
+                                : '完了した日時と完了者を記録しています（クリックで作戦会議も表示）。'}
                         </div>
-                    </div>
-
-                    {/* パーティ＆プロジェクト選択 */}
-                    <div className="retro-window">
-                        <h3 className="text-gray-400 mb-3 text-lg border-b border-gray-600 pb-1">🗺️ ロケーション選択</h3>
-                        <div className="flex flex-col gap-2 max-h-[200px] overflow-y-auto pr-2">
-                            <button
-                                onClick={() => setActiveTab('all')}
-                                className={`p-3 border-2 font-inherit transition-all flex items-center gap-3 relative overflow-hidden group
-                                    ${activeTab === 'all' ? 'border-white bg-[#111] scale-105 shadow-[0_0_15px_rgba(255,255,255,0.2)]' : 'border-gray-700 bg-black text-gray-500 hover:border-gray-400'}`}
-                            >
-                                {activeTab === 'all' && <span className="text-[var(--active-color)] animate-pulse absolute left-1">▶︎</span>}
-                                <span className={`text-2xl ml-3 ${activeTab === 'all' ? '' : 'filter grayscale opacity-50'}`}>🌍</span>
-                                <span className={`font-bold tracking-widest ${activeTab === 'all' ? 'text-white' : ''}`}>全体マップ</span>
-                            </button>
-                            {projects.map((p: any) => (
-                                <button
-                                    key={p.id}
-                                    onClick={() => setActiveTab(p.id)}
-                                    className={`p-3 border-2 font-inherit transition-all flex items-center gap-3 relative overflow-hidden group
-                                        ${activeTab === p.id ? 'border-white bg-[#111] scale-105 shadow-[0_0_15px_rgba(255,255,255,0.2)]' : 'border-gray-700 bg-black text-gray-500 hover:border-gray-400'}`}
-                                >
-                                    {activeTab === p.id && <span className="text-[var(--active-color)] animate-pulse absolute left-1">▶︎</span>}
-                                    <span className={`text-2xl ml-3 ${activeTab === p.id ? '' : 'filter grayscale opacity-50'}`}>🏰</span>
-                                    <span className={`font-bold tracking-widest ${activeTab === p.id ? 'text-white' : ''}`}>{p.name}</span>
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-
-                    {/* 👥 パーティ名簿 */}
-                    <div className="retro-window">
-                        <h3 className="text-gray-400 mb-2 text-lg border-b border-gray-600 pb-1">👥 パーティ名簿</h3>
-                        {activeTab !== 'all' && isManager && (
-                            <div className="text-[10px] text-yellow-500/70 mb-3 italic">
-                                ※プルダウンから仲間の役職を変更できます。
-                            </div>
-                        )}
-                        {partyRoster.length === 0 ? (
-                            <div className="text-sm text-gray-500">まだ誰もいません</div>
-                        ) : (
-                            <div className="flex flex-col gap-2">
-                                {partyRoster.map((member: any) => {
-                                    const canEdit = canEditMemberRole(member.user_id, member.role)
-                                    const roleLabel = member.role === 'owner' ? 'オーナー' : member.role === 'admin' ? '軍師' : 'メンバー'
-                                    return (
-                                    <div key={member.user_id} className="flex items-center gap-2 bg-gray-900 border border-gray-700 p-1 px-2 rounded-sm">
-                                        <img 
-                                            src={member.avatar_url} 
-                                            alt={member.display_name} 
-                                            className="w-5 h-5 pixelated-avatar border border-black object-cover" 
-                                        />
-                                        <span className="text-sm text-gray-300 flex-1 truncate">{member.display_name}</span>
-                                        <span className="text-[10px] text-gray-400 border border-gray-600 px-1.5 py-0.5 rounded">{roleLabel}</span>
-                                        {activeTab !== 'all' && isManager && (
-                                            canEdit ? (
-                                                <select
-                                                    value={member.role}
-                                                    disabled={changingRoleUserId === member.user_id}
-                                                    onChange={(e) => updateMemberRole(member.user_id, e.target.value)}
-                                                    className="bg-black border border-gray-600 text-[10px] text-gray-300 p-1 cursor-pointer"
-                                                >
-                                                    <option value="member">メンバー</option>
-                                                    <option value="admin">軍師</option>
-                                                </select>
-                                            ) : (
-                                                <span className="text-[10px] text-gray-600">{member.user_id === user.id ? '自分' : '固定'}</span>
-                                            )
-                                        )}
-                                    </div>
-                                )})}
-                            </div>
-                        )}
-                    </div>
-
-                    {/* アーカイブ */}
-                    {completedTasks.length > 0 && (
-                        <div className="mt-8 border-t-2 border-dashed border-gray-500 pt-4 bg-black/65 backdrop-blur-[1px] px-3 md:px-4 pb-3 rounded-sm">
-                            <h3 className="text-yellow-300 mb-1 text-lg font-bold tracking-wide">🪦 討伐完了（アーカイブ）</h3>
-                            <div className="text-[11px] text-gray-300 mb-4">
-                                {activeTab === 'all'
-                                    ? '各拠点ごとに完了したクエストを一覧表示しています。'
-                                    : '完了した日時と完了者を記録しています（クリックで作戦会議も表示）。'}
-                            </div>
-                            {activeTab === 'all' ? (
-                                <div className="flex flex-col gap-3">
-                                    {completedTasksByProject.map((group: any) => (
-                                        <div key={group.projectId} className="border border-gray-600 bg-black/70 rounded-sm overflow-hidden">
-                                            <div className="px-2 py-1.5 text-[11px] text-yellow-200 border-b border-gray-700 font-bold tracking-wide bg-black/60">
-                                                🏰 {group.projectName} ({group.tasks.length})
-                                            </div>
-                                            <ul className="list-none p-0 m-0">
-                                                {group.tasks.map((task: any) => (
-                                                    <li key={task.id} className="px-2 py-2 border-b border-gray-800 last:border-b-0 flex items-center justify-between gap-2">
-                                                        <div className="min-w-0">
-                                                            <div className="text-[11px] text-gray-100 line-through break-words">{task.title}</div>
-                                                            <div className="text-[10px] text-gray-300 mt-0.5">
-                                                                完了: {task.completed_at ? new Date(task.completed_at).toLocaleString('ja-JP') : '日時未記録'}
-                                                            </div>
-                                                            <div className="text-[10px] text-gray-400">
-                                                                完了者: {getDisplayNameByUserId(task.completed_by_user_id)}
-                                                            </div>
-                                                        </div>
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => markCompleted(task, false)}
-                                                            className="shrink-0 text-[10px] px-2 py-1 border border-teal-400 text-teal-200 bg-[#062323] hover:bg-[#0b3434] transition-colors"
-                                                            title="このタスクを未完了に戻す"
-                                                        >
-                                                            ↩ 復活
-                                                        </button>
-                                                    </li>
-                                                ))}
-                                            </ul>
+                        {activeTab === 'all' ? (
+                            <div className="flex flex-col gap-3">
+                                {completedTasksByProject.map((group: any) => (
+                                    <div key={group.projectId} className="border border-gray-600 bg-black/70 rounded-sm overflow-hidden">
+                                        <div className="px-2 py-1.5 text-[11px] text-yellow-200 border-b border-gray-700 font-bold tracking-wide bg-black/60">
+                                            🏰 {group.projectName} ({group.tasks.length})
                                         </div>
-                                    ))}
-                                </div>
-                            ) : (
-                                <ul className="list-none p-0 m-0">
-                                    {completedTasks.map((task: any) => {
-                                        const isEditingTaskTitle = editingTaskId === task.id;
-                                        return (
-                                            <li key={task.id} className="border-b border-gray-700 bg-black/50 transition-colors hover:bg-black/70">
-                                                <div className="flex items-start md:items-center p-2 md:p-3 gap-2 md:gap-4">
-                                                    <div className="relative shrink-0 flex items-center">
-                                                        <input type="checkbox" checked={true} onChange={(e) => markCompleted(task, e.target.checked)} className="appearance-none w-5 h-5 md:w-6 md:h-6 border-2 border-gray-600 bg-black cursor-pointer align-middle" />
-                                                        <span className="absolute top-[-4px] left-[2px] text-lg md:text-xl text-gray-400 pointer-events-none">✔</span>
-                                                    </div>
-                                                     <div className="grow text-sm md:text-lg text-gray-200 line-through flex items-center flex-wrap gap-1.5 md:gap-2 min-w-0">
-                                                        {isEditingTaskTitle ? (
-                                                            <div
-                                                                data-task-edit-panel="true"
-                                                                className="relative flex items-center flex-wrap gap-2 min-w-[280px] flex-1"
-                                                                style={{ textDecoration: 'none' }}
-                                                            >
-                                                                <input
-                                                                    type="text"
-                                                                    value={editTaskTitle}
-                                                                    onChange={(e) => setEditTaskTitle(e.target.value)}
-                                                                    onKeyDown={(e) => {
-                                                                        if (e.key === 'Enter') {
-                                                                            e.preventDefault()
-                                                                            saveTaskTitle(task.id)
-                                                                        }
-                                                                        if (e.key === 'Escape') {
-                                                                            cancelTaskTitleEdit()
-                                                                        }
-                                                                    }}
-                                                                    autoFocus
-                                                                    className="min-w-0 flex-1 basis-full md:basis-auto bg-[#1a1200] border border-[var(--active-color)] px-3 py-2 text-white outline-none"
-                                                                />
-                                                                <button
-                                                                    type="button"
-                                                                    data-due-trigger="true"
-                                                                    onClick={openDueDatePicker}
-                                                                    className="shrink-0 px-3 py-2 text-xs font-bold border border-sky-700 text-sky-200 bg-[#071622] hover:bg-[#0b2234] transition-colors"
-                                                                    style={{ textDecoration: 'none' }}
-                                                                >
-                                                                    📅 期限
-                                                                </button>
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => saveTaskTitle(task.id)}
-                                                                    className="shrink-0 px-3 py-2 text-xs font-bold bg-[var(--active-color)] text-black border border-yellow-200 hover:brightness-110"
-                                                                >
-                                                                    保存
-                                                                </button>
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={cancelTaskTitleEdit}
-                                                                    className="shrink-0 px-3 py-2 text-xs font-bold border border-gray-600 text-gray-300 hover:border-gray-400 hover:text-white"
-                                                                >
-                                                                    戻す
-                                                                </button>
-                                                                {isDueDatePickerOpen && (
-                                                                    <div
-                                                                        data-due-picker="true"
-                                                                        className="absolute z-40 right-0 top-full mt-1 w-[min(300px,88vw)] bg-black border-2 border-sky-700 p-2 shadow-[0_6px_24px_rgba(0,0,0,0.65)]"
-                                                                        style={{ textDecoration: 'none' }}
-                                                                    >
-                                                                        <div className="text-[10px] text-sky-200 mb-1">期限を設定</div>
-                                                                        <input
-                                                                            ref={dueDateInputRef}
-                                                                            type="datetime-local"
-                                                                            value={editTaskDueDate}
-                                                                            onChange={(e) => setEditTaskDueDate(e.target.value)}
-                                                                            className="w-full bg-black border border-gray-500 px-2 py-1.5 text-xs text-gray-100 outline-none"
-                                                                            style={{ colorScheme: 'dark' }}
-                                                                        />
-                                                                        <div className="mt-2 flex items-center justify-between gap-2">
-                                                                            <button
-                                                                                type="button"
-                                                                                onClick={() => {
-                                                                                    setEditTaskDueDate('')
-                                                                                    setIsDueDatePickerOpen(false)
-                                                                                }}
-                                                                                className="text-[10px] px-2 py-1 border border-gray-600 text-gray-300 hover:border-gray-400 hover:text-white"
-                                                                            >
-                                                                                期限なし
-                                                                            </button>
-                                                                            <button
-                                                                                type="button"
-                                                                                onClick={() => setIsDueDatePickerOpen(false)}
-                                                                                className="text-[10px] px-2 py-1 border border-sky-700 text-sky-200 hover:bg-[#0b2234]"
-                                                                            >
-                                                                                閉じる
-                                                                            </button>
-                                                                        </div>
-                                                                    </div>
-                                                                )}
-                                                            </div>
-                                                        ) : (
-                                                            <>
-                                                                <span
-                                                                    className="cursor-pointer hover:underline decoration-gray-500 underline-offset-4"
-                                                                    onClick={() => toggleTaskExpansion(task.id)}
-                                                                >
-                                                                    {task.title}
-                                                                </span>
-                                                                <button
-                                                                    type="button"
-                                                                    data-task-edit-trigger="true"
-                                                                    onClick={() => beginTaskTitleEdit(task)}
-                                                                    className="inline-flex items-center gap-1 rounded-sm px-2 py-1 text-[10px] font-bold border border-[#9d7b3b] bg-[#231b0c] text-[#f2d78f] hover:bg-[#2e2411] transition-colors no-underline"
-                                                                    style={{ textDecoration: 'none' }}
-                                                                >
-                                                                    <span>✎</span>
-                                                                    <span>題名・期限</span>
-                                                                </button>
-                                                            </>
-                                                        )}
-                                                        {task.completed_at && (
-                                                            <span className="text-[11px] text-gray-200 no-underline bg-black border border-gray-700 px-2 py-1 rounded">
-                                                                完了: {new Date(task.completed_at).toLocaleString('ja-JP')}
-                                                            </span>
-                                                        )}
-                                                        <span className="text-[11px] text-gray-200 no-underline bg-black border border-gray-700 px-2 py-1 rounded">
-                                                            完了者: {getDisplayNameByUserId(task.completed_by_user_id)}
-                                                        </span>
-                                                        <button
-                                                            type="button"
-                                                            onClick={() => markCompleted(task, false)}
-                                                            className="text-[10px] px-2 py-1 border border-teal-400 text-teal-200 bg-[#062323] hover:bg-[#0b3434] transition-colors no-underline"
-                                                            style={{ textDecoration: 'none' }}
-                                                            title="このタスクを未完了に戻す"
-                                                        >
-                                                            ↩ 復活
-                                                        </button>
-                                                    </div>
-                                                    <div className="flex flex-col items-center gap-1 shrink-0 justify-end w-[80px]">
-                                                        {(() => {
-                                                            const profile = task.assignee_id ? userProfiles[task.assignee_id] : null;
-                                                            const avatar = profile?.avatar_url || getFallbackAvatar(task.assignee_name || 'unknown');
-                                                            const name = profile?.display_name || task.assignee_name || '担当未定';
-                                                            const isUnassigned = isUnassignedTask(task);
-                                                            return (
-                                                                <>
-                                                                    {isUnassigned ? (
-                                                                        <div className="w-6 h-6 flex items-center justify-center border border-gray-600 bg-[#1a1a1a] text-gray-300 text-sm font-bold leading-none">?</div>
-                                                                    ) : (
-                                                                        <div className="w-6 h-6 border border-gray-800 overflow-hidden">
-                                                                            <img
-                                                                                src={avatar}
-                                                                                alt={name}
-                                                                                className="w-full h-full pixelated-avatar-tiny grayscale object-cover"
-                                                                                style={{ transform: 'scale(1.22)' }}
-                                                                                title={name}
-                                                                            />
-                                                                        </div>
-                                                                    )}
-                                                                    <span className="text-[9px] text-gray-400 truncate w-full text-center">
-                                                                        {isUnassigned ? '未アサイン' : name}
-                                                                    </span>
-                                                                </>
-                                                            );
-                                                        })()}
-                                                    </div>
-                                                </div>
-
-                                                {/* 💬 作戦会議（コメント）エリア展開 - アーカイブ版 */}
-                                                {expandedTaskId === task.id && (
-                                                    <div data-comment-panel="true" className="comment-panel-enter bg-[#111] p-3 border-t border-[#222] ml-9 mr-3 mb-3 rounded-sm border border-dashed border-[#444] opacity-80">
-                                                        <h4 className="text-gray-500 mb-2 text-xs flex items-center gap-2">
-                                                            <span>💬 作戦会議（過去の記録）</span>
-                                                        </h4>
-
-                                                        <div className="flex flex-col gap-2 mb-3 pr-2">
-                                                            {comments.length === 0 ? (
-                                                                <div className="text-gray-600 text-[10px] text-center py-1">記録はありません。</div>
-                                                            ) : (
-                                                                comments.map((comment: any) => (
-                                                                    <div key={comment.id} className="flex gap-2">
-                                                                        <img src={`https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(comment.user_email)}`} alt="Avatar" className="w-6 h-6 pixelated-avatar shrink-0 border border-[#444] grayscale" />
-                                                                        <div className="bg-black border border-[#333] p-1.5 rounded-sm relative grow">
-                                                                            <div className="absolute top-2 -left-1.5 w-0 h-0 border-t-[3px] border-t-transparent border-r-[6px] border-r-[#333] border-b-[3px] border-b-transparent"></div>
-                                                                            <div className="flex justify-between items-baseline mb-0.5">
-                                                                                <span className="text-[10px] text-gray-500">{comment.user_email?.split('@')[0]}</span>
-                                                                                <span className="text-[8px] text-gray-700">
-                                                                                    {new Date(comment.created_at).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                                                                                </span>
-                                                                            </div>
-                                                                            <p className="text-xs text-gray-400 whitespace-pre-wrap leading-relaxed">
-                                                                                {cleanCommentContent(comment.content, comment.image_url)}
-                                                                            </p>
-                                                                        </div>
-                                                                    </div>
-                                                                ))
-                                                            )}
+                                        <ul className="list-none p-0 m-0">
+                                            {group.tasks.map((task: any) => (
+                                                <li key={task.id} className="px-2 py-2 border-b border-gray-800 last:border-b-0 flex items-center justify-between gap-2">
+                                                    <div className="min-w-0">
+                                                        <div className="text-[11px] text-gray-100 line-through break-words">{task.title}</div>
+                                                        <div className="text-[10px] text-gray-300 mt-0.5">
+                                                            完了: {task.completed_at ? new Date(task.completed_at).toLocaleString('ja-JP') : '日時未記録'}
                                                         </div>
-
-                                                        <form onSubmit={(e) => submitComment(e, task.id)} className="flex gap-2">
+                                                        <div className="text-[10px] text-gray-400">
+                                                            完了者: {getDisplayNameByUserId(task.completed_by_user_id)}
+                                                        </div>
+                                                    </div>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => markCompleted(task, false)}
+                                                        className="shrink-0 text-[10px] px-2 py-1 border border-teal-400 text-teal-200 bg-[#062323] hover:bg-[#0b3434] transition-colors"
+                                                        title="このタスクを未完了に戻す"
+                                                    >
+                                                        ↩ 復活
+                                                    </button>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                ))}
+                            </div>
+                        ) : (
+                            <ul className="list-none p-0 m-0">
+                                {completedTasks.map((task: any) => {
+                                    const isEditingTaskTitle = editingTaskId === task.id
+                                    return (
+                                        <li key={task.id} className="border-b border-gray-700 bg-black/50 transition-colors hover:bg-black/70">
+                                            <div className="flex items-start md:items-center p-2 md:p-3 gap-2 md:gap-4">
+                                                <div className="relative shrink-0 flex items-center">
+                                                    <input type="checkbox" checked={true} onChange={(e) => markCompleted(task, e.target.checked)} className="appearance-none w-5 h-5 md:w-6 md:h-6 border-2 border-gray-600 bg-black cursor-pointer align-middle" />
+                                                    <span className="absolute top-[-4px] left-[2px] text-lg md:text-xl text-gray-400 pointer-events-none">✔</span>
+                                                </div>
+                                                <div className="grow text-sm md:text-lg text-gray-200 line-through flex items-center flex-wrap gap-1.5 md:gap-2 min-w-0">
+                                                    {isEditingTaskTitle ? (
+                                                        <div
+                                                            data-task-edit-panel="true"
+                                                            className="relative flex items-center flex-wrap gap-2 min-w-[280px] flex-1"
+                                                            style={{ textDecoration: 'none' }}
+                                                        >
                                                             <input
                                                                 type="text"
-                                                                value={newComment}
-                                                                onChange={(e) => setNewComment(e.target.value)}
-                                                                placeholder="追記する..."
-                                                                className="grow bg-black border border-[#444] p-1.5 text-gray-400 text-xs outline-none focus:border-gray-500 transition-colors"
+                                                                value={editTaskTitle}
+                                                                onChange={(e) => setEditTaskTitle(e.target.value)}
+                                                                onKeyDown={(e) => {
+                                                                    if (e.key === 'Enter') {
+                                                                        e.preventDefault()
+                                                                        saveTaskTitle(task.id)
+                                                                    }
+                                                                    if (e.key === 'Escape') {
+                                                                        cancelTaskTitleEdit()
+                                                                    }
+                                                                }}
+                                                                autoFocus
+                                                                className="min-w-0 flex-1 basis-full md:basis-auto bg-[#1a1200] border border-[var(--active-color)] px-3 py-2 text-white outline-none"
                                                             />
                                                             <button
-                                                                type="submit"
-                                                                disabled={!newComment.trim()}
-                                                                className="px-3 bg-black border border-[#444] text-gray-400 text-xs hover:bg-[#222] hover:text-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                                                type="button"
+                                                                data-due-trigger="true"
+                                                                onClick={openDueDatePicker}
+                                                                className="shrink-0 px-3 py-2 text-xs font-bold border border-sky-700 text-sky-200 bg-[#071622] hover:bg-[#0b2234] transition-colors"
+                                                                style={{ textDecoration: 'none' }}
                                                             >
-                                                                追記
+                                                                📅 期限
                                                             </button>
-                                                        </form>
-                                                    </div>
-                                                )}
-                                            </li>
-                                        );
-                                    })}
-                                </ul>
-                            )}
-                        </div>
-                    )}
-                </div>
-            </div>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => saveTaskTitle(task.id)}
+                                                                className="shrink-0 px-3 py-2 text-xs font-bold bg-[var(--active-color)] text-black border border-yellow-200 hover:brightness-110"
+                                                            >
+                                                                保存
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={cancelTaskTitleEdit}
+                                                                className="shrink-0 px-3 py-2 text-xs font-bold border border-gray-600 text-gray-300 hover:border-gray-400 hover:text-white"
+                                                            >
+                                                                戻す
+                                                            </button>
+                                                            {isDueDatePickerOpen && (
+                                                                <div
+                                                                    data-due-picker="true"
+                                                                    className="absolute z-40 right-0 top-full mt-1 w-[min(300px,88vw)] bg-black border-2 border-sky-700 p-2 shadow-[0_6px_24px_rgba(0,0,0,0.65)]"
+                                                                    style={{ textDecoration: 'none' }}
+                                                                >
+                                                                    <div className="text-[10px] text-sky-200 mb-1">期限を設定</div>
+                                                                    <input
+                                                                        ref={dueDateInputRef}
+                                                                        type="datetime-local"
+                                                                        value={editTaskDueDate}
+                                                                        onChange={(e) => setEditTaskDueDate(e.target.value)}
+                                                                        className="w-full bg-black border border-gray-500 px-2 py-1.5 text-xs text-gray-100 outline-none"
+                                                                        style={{ colorScheme: 'dark' }}
+                                                                    />
+                                                                    <div className="mt-2 flex items-center justify-between gap-2">
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => {
+                                                                                setEditTaskDueDate('')
+                                                                                setIsDueDatePickerOpen(false)
+                                                                            }}
+                                                                            className="text-[10px] px-2 py-1 border border-gray-600 text-gray-300 hover:border-gray-400 hover:text-white"
+                                                                        >
+                                                                            期限なし
+                                                                        </button>
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => setIsDueDatePickerOpen(false)}
+                                                                            className="text-[10px] px-2 py-1 border border-sky-700 text-sky-200 hover:bg-[#0b2234]"
+                                                                        >
+                                                                            閉じる
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    ) : (
+                                                        <>
+                                                            <span
+                                                                className="cursor-pointer hover:underline decoration-gray-500 underline-offset-4"
+                                                                onClick={() => toggleTaskExpansion(task.id)}
+                                                            >
+                                                                {task.title}
+                                                            </span>
+                                                            <button
+                                                                type="button"
+                                                                data-task-edit-trigger="true"
+                                                                onClick={() => beginTaskTitleEdit(task)}
+                                                                className="inline-flex items-center gap-1 rounded-sm px-2 py-1 text-[10px] font-bold border border-[#9d7b3b] bg-[#231b0c] text-[#f2d78f] hover:bg-[#2e2411] transition-colors no-underline"
+                                                                style={{ textDecoration: 'none' }}
+                                                            >
+                                                                <span>✎</span>
+                                                                <span>題名・期限</span>
+                                                            </button>
+                                                        </>
+                                                    )}
+                                                    {task.completed_at && (
+                                                        <span className="text-[11px] text-gray-200 no-underline bg-black border border-gray-700 px-2 py-1 rounded">
+                                                            完了: {new Date(task.completed_at).toLocaleString('ja-JP')}
+                                                        </span>
+                                                    )}
+                                                    <span className="text-[11px] text-gray-200 no-underline bg-black border border-gray-700 px-2 py-1 rounded">
+                                                        完了者: {getDisplayNameByUserId(task.completed_by_user_id)}
+                                                    </span>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => markCompleted(task, false)}
+                                                        className="text-[10px] px-2 py-1 border border-teal-400 text-teal-200 bg-[#062323] hover:bg-[#0b3434] transition-colors no-underline"
+                                                        style={{ textDecoration: 'none' }}
+                                                        title="このタスクを未完了に戻す"
+                                                    >
+                                                        ↩ 復活
+                                                    </button>
+                                                </div>
+                                                <div className="flex flex-col items-center gap-1 shrink-0 justify-end w-[80px]">
+                                                    {(() => {
+                                                        const profile = task.assignee_id ? knownUserProfiles[task.assignee_id] : null
+                                                        const avatar = profile?.avatar_url || getFallbackAvatar(task.assignee_name || 'unknown')
+                                                        const name = profile?.display_name || task.assignee_name || '担当未定'
+                                                        const isUnassigned = isUnassignedTask(task)
+                                                        return (
+                                                            <>
+                                                                {isUnassigned ? (
+                                                                    <div className="w-6 h-6 flex items-center justify-center border border-gray-600 bg-[#1a1a1a] text-gray-300 text-sm font-bold leading-none">?</div>
+                                                                ) : (
+                                                                    <div className="w-6 h-6 border border-gray-800 overflow-hidden">
+                                                                        <img
+                                                                            src={avatar}
+                                                                            alt={name}
+                                                                            className="w-full h-full pixelated-avatar-tiny grayscale object-cover"
+                                                                            style={{ transform: 'scale(1.22)' }}
+                                                                            title={name}
+                                                                        />
+                                                                    </div>
+                                                                )}
+                                                                <span className="text-[9px] text-gray-400 truncate w-full text-center">
+                                                                    {isUnassigned ? '未アサイン' : name}
+                                                                </span>
+                                                            </>
+                                                        )
+                                                    })()}
+                                                </div>
+                                            </div>
 
-        </main>
+                                            {/* 💬 作戦会議（コメント）エリア展開 - アーカイブ版 */}
+                                            {expandedTaskId === task.id && (
+                                                <div data-comment-panel="true" className="comment-panel-enter bg-[#111] p-3 border-t border-[#222] ml-9 mr-3 mb-3 rounded-sm border border-dashed border-[#444] opacity-80">
+                                                    <h4 className="text-gray-500 mb-2 text-xs flex items-center gap-2">
+                                                        <span>💬 作戦会議（過去の記録）</span>
+                                                    </h4>
+
+                                                    <div className="flex flex-col gap-2 mb-3 pr-2">
+                                                        {comments.length === 0 ? (
+                                                            <div className="text-gray-600 text-[10px] text-center py-1">記録はありません。</div>
+                                                        ) : (
+                                                            comments.map((comment: any) => (
+                                                                <div key={comment.id} className="flex gap-2">
+                                                                    <img src={`https://api.dicebear.com/7.x/pixel-art/svg?seed=${encodeURIComponent(comment.user_email)}`} alt="Avatar" className="w-6 h-6 pixelated-avatar shrink-0 border border-[#444] grayscale" />
+                                                                    <div className="bg-black border border-[#333] p-1.5 rounded-sm relative grow">
+                                                                        <div className="absolute top-2 -left-1.5 w-0 h-0 border-t-[3px] border-t-transparent border-r-[6px] border-r-[#333] border-b-[3px] border-b-transparent"></div>
+                                                                        <div className="flex justify-between items-baseline mb-0.5">
+                                                                            <span className="text-[10px] text-gray-500">{comment.user_email?.split('@')[0]}</span>
+                                                                            <span className="text-[8px] text-gray-700">
+                                                                                {new Date(comment.created_at).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                                                            </span>
+                                                                        </div>
+                                                                        <p className="text-xs text-gray-400 whitespace-pre-wrap leading-relaxed">
+                                                                            {cleanCommentContent(comment.content, comment.image_url)}
+                                                                        </p>
+                                                                    </div>
+                                                                </div>
+                                                            ))
+                                                        )}
+                                                    </div>
+
+                                                    <form onSubmit={(e) => submitComment(e, task.id)} className="flex gap-2">
+                                                        <input
+                                                            type="text"
+                                                            value={newComment}
+                                                            onChange={(e) => setNewComment(e.target.value)}
+                                                            placeholder="追記する..."
+                                                            className="grow bg-black border border-[#444] p-1.5 text-gray-400 text-xs outline-none focus:border-gray-500 transition-colors"
+                                                        />
+                                                        <button
+                                                            type="submit"
+                                                            disabled={!newComment.trim()}
+                                                            className="px-3 bg-black border border-[#444] text-gray-400 text-xs hover:bg-[#222] hover:text-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                                        >
+                                                            追記
+                                                        </button>
+                                                    </form>
+                                                </div>
+                                            )}
+                                        </li>
+                                    )
+                                })}
+                            </ul>
+                        )}
+                    </div>
+                )}
+            </div>
+        </div>
+    </main>
     )
 }
+

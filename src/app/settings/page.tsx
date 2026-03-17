@@ -1,13 +1,20 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 
 export default function SettingsPage() {
-    const supabase = createClient()
     const router = useRouter()
+    const supabaseRef = useRef<ReturnType<typeof createClient> | null>(null)
+
+    const getSupabase = () => {
+        if (supabaseRef.current) return supabaseRef.current
+        if (typeof window === 'undefined') return null
+        supabaseRef.current = createClient()
+        return supabaseRef.current
+    }
 
     const [user, setUser] = useState<any>(null)
     const [displayName, setDisplayName] = useState('')
@@ -25,6 +32,11 @@ export default function SettingsPage() {
     // ユーザー情報とプロフィールの読み込み
     useEffect(() => {
         const loadProfile = async () => {
+            const supabase = getSupabase()
+            if (!supabase) {
+                setLoading(false)
+                return
+            }
             const { data: { user } } = await supabase.auth.getUser()
             if (!user) {
                 router.push('/login')
@@ -47,11 +59,16 @@ export default function SettingsPage() {
             setLoading(false)
         }
         loadProfile()
-    }, [])
+    }, [router])
 
     // プロフィール保存
     const saveProfile = async () => {
         if (!user) return
+        const supabase = getSupabase()
+        if (!supabase) {
+            setMessage('Supabase接続の初期化に失敗しました。')
+            return
+        }
         setSaving(true)
         setMessage(null)
 
@@ -77,6 +94,11 @@ export default function SettingsPage() {
     // メールアドレス変更
     const updateEmail = async () => {
         if (!newEmail || newEmail === user?.email) return
+        const supabase = getSupabase()
+        if (!supabase) {
+            setMessage('Supabase接続の初期化に失敗しました。')
+            return
+        }
         setSaving(true)
         setMessage(null)
         const { error } = await supabase.auth.updateUser({ email: newEmail })
@@ -91,6 +113,11 @@ export default function SettingsPage() {
     // アバター写真のアップロード
     const uploadAvatar = async (event: any) => {
         try {
+            const supabase = getSupabase()
+            if (!supabase) {
+                setMessage('Supabase接続の初期化に失敗しました。')
+                return
+            }
             setUploading(true)
             if (!event.target.files || event.target.files.length === 0) return
 
@@ -125,6 +152,11 @@ export default function SettingsPage() {
     const changePassword = async () => {
         if (!newPassword || newPassword.length < 6) {
             setPasswordMessage('パスワードは最低6文字以上にしてください。')
+            return
+        }
+        const supabase = getSupabase()
+        if (!supabase) {
+            setPasswordMessage('Supabase接続の初期化に失敗しました。')
             return
         }
         const { error } = await supabase.auth.updateUser({ password: newPassword })
@@ -282,6 +314,10 @@ export default function SettingsPage() {
                 <div className="text-center">
                     <button
                         onClick={async () => {
+                            const supabase = getSupabase()
+                            if (!supabase) {
+                                return
+                            }
                             await supabase.auth.signOut()
                             router.push('/login')
                         }}
