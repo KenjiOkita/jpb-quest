@@ -2278,7 +2278,7 @@ export default function DashboardClient({ initialProjects, initialTasks, initial
             <div className="flex flex-col lg:flex-row gap-6">
 
                 {/* 左カラム：メインタスクエリア（広め）*/}
-                <div className="w-full lg:flex-[3] min-w-0 flex flex-col gap-6">
+                <div className="w-full lg:flex-1 min-w-0 flex flex-col gap-6">
                     {/* プロジェクト作成エリア (マネージャー以上のみ) */}
                     {isManager && (
                         <div className="flex gap-2">
@@ -2670,7 +2670,7 @@ export default function DashboardClient({ initialProjects, initialTasks, initial
                 )}
                 </div>
 
-                <div className="w-full lg:flex-1 lg:min-w-[280px] flex flex-col gap-6">
+                <div className="w-full lg:w-80 lg:shrink-0 flex flex-col gap-6">
                     {/* 右カラム：サイドバー */}
                     <PartySidebar
                         inviteCodeInput={inviteCodeInput}
