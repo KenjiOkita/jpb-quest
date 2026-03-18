@@ -2107,7 +2107,7 @@ export default function DashboardClient({ initialProjects, initialTasks, initial
     }
 
     return (
-        <main className="py-6 md:py-12 min-h-screen relative max-w-none md:max-w-4xl mx-0 md:mx-auto px-0 md:px-4 overflow-x-clip">
+        <main className="min-h-screen relative overflow-x-clip">
             {(pullDistance > 0 || isRefreshing) && (
                 <div
                     className="fixed left-1/2 top-3 z-[220] transition-all duration-150"
