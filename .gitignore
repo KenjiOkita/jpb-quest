@@ -39,3 +39,23 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# 機密資料（GitHubに上げない）
+private/
+契約書/
+顧客情報/
+*契約*
+*見積*
+*請求*
+*顧客*
+
+# 認証情報
+.env
+.env.*
+*.key
+
+# 個人情報を含みやすいデータファイル
+*.csv
+*.xlsx
+*.xls
+
